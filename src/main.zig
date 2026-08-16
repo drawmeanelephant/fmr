@@ -9,6 +9,7 @@ const sync = @import("sync.zig");
 const status = @import("status.zig");
 const doctor = @import("doctor.zig");
 const exec = @import("exec.zig");
+const rag = @import("rag.zig");
 const ui = @import("ui.zig");
 
 pub fn main(init: std.process.Init) u8 {
@@ -25,6 +26,7 @@ pub fn main(init: std.process.Init) u8 {
 
     var config_path: ?[]const u8 = null;
     var jobs: ?usize = null;
+    var force = false;
     var cmd: ?[]const u8 = null;
     var repo_args = ArrayList([]const u8).init(ctx.alloc);
 
@@ -42,6 +44,8 @@ pub fn main(init: std.process.Init) u8 {
             if (i >= argv.items.len) return usage(&ctx, "missing value after --jobs");
             jobs = std.fmt.parseInt(usize, argv.items[i], 10) catch return usage(&ctx, "--jobs expects a positive integer");
             if (jobs.? == 0) return usage(&ctx, "--jobs expects a positive integer");
+        } else if (std.mem.eql(u8, a, "--force") or std.mem.eql(u8, a, "-f")) {
+            force = true;
         } else if (std.mem.eql(u8, a, "-a") or std.mem.eql(u8, a, "--all")) {
             continue;
         } else if (a.len > 0 and a[0] == '-') {
@@ -126,9 +130,16 @@ pub fn main(init: std.process.Init) u8 {
         const run_extra = repo_args.items[2..];
         return exec.runCmd(&ctx, &cfg, run_repo, run_cmd, run_extra, &pr);
     } else if (std.mem.eql(u8, c, "rag")) {
-        process.stderrLineNewline(&ctx, "fmr rag: not implemented in this build (planned for slice 2)", .{});
-        process.stderrLineNewline(&ctx, "available commands: status, sync, doctor, check, run", .{});
-        return 2;
+        if (repo_args.items.len > 0) {
+            if (unknownRepo(&ctx, &cfg, repo_args.items)) return 2;
+        }
+        var names = ArrayList([]const u8).init(ctx.alloc);
+        if (repo_args.items.len > 0) {
+            names.appendSlice(repo_args.items) catch return 1;
+        } else {
+            for (cfg.repos) |*r| names.append(r.name) catch return 1;
+        }
+        return rag.run(&ctx, &cfg, names.items, force, &pr);
     } else {
         return usage(&ctx, "unknown command");
     }
@@ -162,15 +173,15 @@ fn unknownRepo(ctx: *const process.Ctx, cfg: *const config.Config, names: []cons
 
 fn help(ctx: *const process.Ctx) u8 {
     process.stderrLineNewline(ctx, "fmr — Workspace Manager in Zig", .{});
-    process.stderrLineNewline(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>]", .{});
-    process.stderrLineNewline(ctx, "commands: status | sync | doctor | check | run <repo> <cmd> [args...]", .{});
+    process.stderrLineNewline(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>] [--force]", .{});
+    process.stderrLineNewline(ctx, "commands: status | sync | doctor | check | run | rag", .{});
     return 0;
 }
 
 fn usage(ctx: *const process.Ctx, reason: []const u8) u8 {
     if (reason.len > 0) process.stderrLineNewline(ctx, "fmr: {s}", .{reason});
-    process.stderrLineNewline(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>]", .{});
-    process.stderrLineNewline(ctx, "commands: status | sync | doctor | check | run <repo> <cmd> [args...]", .{});
+    process.stderrLineNewline(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>] [--force]", .{});
+    process.stderrLineNewline(ctx, "commands: status | sync | doctor | check | run | rag", .{});
     return 2;
 }
 
@@ -182,6 +193,7 @@ test {
     _ = @import("sync.zig");
     _ = @import("status.zig");
     _ = @import("doctor.zig");
-    _ = @import("ui.zig");
     _ = @import("exec.zig");
+    _ = @import("rag.zig");
+    _ = @import("ui.zig");
 }
