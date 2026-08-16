@@ -106,6 +106,14 @@ fn mainImpl(init: std.process.Init) !u8 {
         \\    "worktrees": "{s}",
         \\    "sourceRag": "{s}"
         \\  }},
+        \\  "defaults": {{
+        \\    "zig": {{
+        \\      "check": {{ "argv": ["true"] }},
+        \\      "commands": {{
+        \\        "test-default": {{ "argv": ["echo", "kind-default-ok"] }}
+        \\      }}
+        \\    }}
+        \\  }},
         \\  "repos": [
         \\    {{ "name": "alpha", "url": "{s}/alpha.git", "kind": "zig", "default_branch": "afterparty" }},
         \\    {{ "name": "unborn", "url": "{s}/unborn.git", "default_branch": "afterparty" }},
@@ -113,10 +121,21 @@ fn mainImpl(init: std.process.Init) !u8 {
         \\    {{ "name": "wt2", "url": "{s}/wt.git" }},
         \\    {{ "name": "badurl", "url": "{s}/nope.git" }},
         \\    {{ "name": "paused", "url": "{s}/wt.git", "sync": {{ "enabled": false }},
-        \\       "rag": {{ "command": {{ "argv": ["true"], "output": "x" }} }} }}
+        \\       "rag": {{ "command": {{ "argv": ["true"], "output": "x" }} }} }},
+        \\    {{ "name": "check-kd", "url": "{s}/check-kd.git", "kind": "zig", "default_branch": "main" }},
+        \\    {{ "name": "check-ex", "url": "{s}/check-ex.git", "default_branch": "main",
+        \\       "check": {{ "argv": ["true"] }} }},
+        \\    {{ "name": "check-skip", "url": "{s}/check-skip.git", "default_branch": "main" }},
+        \\    {{ "name": "check-fail", "url": "{s}/check-fail.git", "default_branch": "main",
+        \\       "check": {{ "argv": ["false"] }} }},
+        \\    {{ "name": "cmd-repo", "url": "{s}/cmd-repo.git", "default_branch": "main",
+        \\       "commands": {{
+        \\         "show-env": {{ "argv": ["sh", "-c", "echo FMR=$FMR_REPO"] }},
+        \\         "echo-it": {{ "argv": ["echo"] }}
+        \\       }} }}
         \\  ]
         \\}}
-    , .{ repos_root, wt_root, rag_root, origins, origins, origins, origins, origins, origins });
+    , .{ repos_root, wt_root, rag_root, origins, origins, origins, origins, origins, origins, origins, origins, origins, origins, origins });
     try std.Io.Dir.cwd().writeFile(ctx.io, .{ .sub_path = config_path, .data = config_json });
 
     const init_src = try std.Io.Dir.path.join(ctx.alloc, &.{ tmp, "init-src" });
@@ -134,6 +153,12 @@ fn mainImpl(init: std.process.Init) !u8 {
 
     try initRepo(&ctx, try std.Io.Dir.path.join(ctx.alloc, &.{ tmp, "wt-src" }), "main");
     try makeBareOrigin(&ctx, try std.Io.Dir.path.join(ctx.alloc, &.{ tmp, "wt-src" }), try std.Io.Dir.path.join(ctx.alloc, &.{ origins, "wt.git" }));
+
+    // Create bare origins for check/run fixture repos (reuse init_src history).
+    for (&[_][]const u8{ "check-kd", "check-ex", "check-skip", "check-fail", "cmd-repo" }) |rn| {
+        const bare = try std.fmt.allocPrint(ctx.alloc, "{s}/{s}.git", .{ origins, rn });
+        try makeBareOrigin(&ctx, init_src, bare);
+    }
 
     const fmr = [_][]const u8{fmr_bin};
     var base_args = ArrayList([]const u8).init(ctx.alloc);
@@ -449,6 +474,83 @@ fn mainImpl(init: std.process.Init) !u8 {
         const args = base_args.items;
         const res = try fmrRun(&ctx, args, &.{ "sync", "alpha", "alpha" }, &pr_env);
         expect(&ctx, res.ok(), "sync alpha alpha exits 0");
+    }
+
+    // -------------------------------------------------------------------
+    // Slice-1: check and run scenarios
+    // -------------------------------------------------------------------
+
+    // Sync check/run fixture repos before running check or run against them.
+    for (&[_][]const u8{ "check-kd", "check-ex", "check-skip", "check-fail", "cmd-repo" }) |rn| {
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "sync", rn }, &pr_env);
+        expect(&ctx, res.ok(), try std.fmt.allocPrint(ctx.alloc, "sync {s} exits 0", .{rn}));
+    }
+
+    current = "check using kind default (zig defaults check argv)";
+    {
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "check", "check-kd" }, &pr_env);
+        expectExit(&ctx, res, 0, "exit 0");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "[ok]") != null, "reports [ok]");
+    }
+
+    current = "check using repo-specific argv";
+    {
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "check", "check-ex" }, &pr_env);
+        expectExit(&ctx, res, 0, "exit 0");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "[ok]") != null, "reports [ok]");
+    }
+
+    current = "check skip when no check defined";
+    {
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "check", "check-skip" }, &pr_env);
+        expectExit(&ctx, res, 0, "exit 0 (skip is not a failure)");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "[skip]") != null, "reports [skip]");
+    }
+
+    current = "check failing command returns exit 4";
+    {
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "check", "check-fail" }, &pr_env);
+        expectExit(&ctx, res, 4, "exit 4 on subprocess failure");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "[fail]") != null, "reports [fail]");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "check-fail") != null, "names the repo");
+    }
+
+    current = "run with env injection and arg forwarding";
+    {
+        const args = base_args.items;
+        // show-env echoes FMR=$FMR_REPO — verify the env var is set to the repo path.
+        const cmd_repo_path = try std.Io.Dir.path.join(ctx.alloc, &.{ repos_root, "cmd-repo" });
+        const res = try fmrRun(&ctx, args, &.{ "run", "cmd-repo", "show-env" }, &pr_env);
+        expectExit(&ctx, res, 0, "exit 0");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "FMR=") != null, "FMR env var present");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, cmd_repo_path) != null, "FMR_REPO points to repo path");
+        // echo-it with extra args — verify args are forwarded.
+        const res2 = try fmrRun(&ctx, args, &.{ "run", "cmd-repo", "echo-it", "hello-world" }, &pr_env);
+        expectExit(&ctx, res2, 0, "exit 0 with extra arg");
+        expect(&ctx, std.mem.indexOf(u8, res2.stdout, "hello-world") != null, "extra arg forwarded");
+    }
+
+    current = "run with kind-default command";
+    {
+        const args = base_args.items;
+        // check-kd is kind=zig; zig defaults include test-default command.
+        const res = try fmrRun(&ctx, args, &.{ "run", "check-kd", "test-default" }, &pr_env);
+        expectExit(&ctx, res, 0, "exit 0");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "kind-default-ok") != null, "kind-default command ran");
+    }
+
+    current = "run with unknown command returns exit 2";
+    {
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "run", "cmd-repo", "nope" }, &pr_env);
+        expectExit(&ctx, res, 2, "exit 2 for unknown command");
+        expect(&ctx, std.mem.indexOf(u8, res.stderr, "nope") != null, "names the unknown command");
+        expect(&ctx, std.mem.indexOf(u8, res.stderr, "available commands") != null, "lists available commands");
     }
 
     pr.line(&ctx, .gray, "e2e tmp dir kept for inspection on failure: {s}", .{tmp});

@@ -31,6 +31,15 @@ pub const CheckCfg = struct {
     argv: []const []const u8,
 };
 
+/// Per-kind defaults resolved once at config load time.
+/// Command entries are merged into each repo of that kind (repo-level wins on
+/// name collision).
+pub const KindDefaults = struct {
+    check: ?[]const []const u8 = null,
+    cmd_names: []const []const u8 = &.{},
+    cmd_argv: []const []const []const u8 = &.{},
+};
+
 pub const Rag = union(enum) {
     command: struct {
         argv: []const []const u8,
@@ -122,7 +131,7 @@ pub fn load(ctx: *const process.Ctx, path: []const u8, diag: *Diag) LoadError!Co
     };
 
     var paths: ?Paths = null;
-    var defaults: std.array_hash_map.String([]const []const u8) = .empty;
+    var defaults: std.array_hash_map.String(KindDefaults) = .empty;
     defer defaults.deinit(alloc);
     var repos = ArrayList(Repo).init(alloc);
 
@@ -154,16 +163,42 @@ pub fn load(ctx: *const process.Ctx, path: []const u8, diag: *Diag) LoadError!Co
                     diag.add("defaults: unknown kind {s}", .{k});
                     return error.InvalidConfig;
                 }
-                const ko = try obj(o.get(k).?, diag, "defaults.{s}") orelse return error.InvalidConfig;
-                try rejectUnknown(ko, &.{"check"}, diag, "defaults.{s}");
-                const check_v = ko.get("check") orelse continue;
-                const check_o = try obj(check_v, diag, "defaults.{s}.check") orelse return error.InvalidConfig;
-                const argv_val = check_o.get("argv") orelse {
-                    diag.add("defaults.{s}.check: missing argv", .{k});
-                    return error.InvalidConfig;
-                };
-                const argv = try strArray(argv_val, diag, "defaults.{s}.check.argv") orelse return error.InvalidConfig;
-                try defaults.put(alloc, k, argv);
+                const ko = try obj(o.get(k).?, diag, "defaults.kind") orelse return error.InvalidConfig;
+                try rejectUnknown(ko, &.{ "check", "commands" }, diag, "defaults.kind");
+                var kd = KindDefaults{};
+                if (ko.get("check")) |check_v| {
+                    const check_o = try obj(check_v, diag, "defaults.kind.check") orelse return error.InvalidConfig;
+                    try rejectUnknown(check_o, &.{"argv"}, diag, "defaults.kind.check");
+                    const argv_val = check_o.get("argv") orelse {
+                        diag.add("defaults.kind.check: missing argv", .{});
+                        return error.InvalidConfig;
+                    };
+                    kd.check = try strArray(argv_val, diag, "defaults.kind.check.argv") orelse return error.InvalidConfig;
+                }
+                if (ko.get("commands")) |cmds_v| {
+                    const cmds_o = try obj(cmds_v, diag, "defaults.kind.commands") orelse return error.InvalidConfig;
+                    var def_names = ArrayList([]const u8).init(alloc);
+                    var def_argv = ArrayList([]const []const u8).init(alloc);
+                    for (cmds_o.keys()) |cn| {
+                        if (!validName(cn)) {
+                            diag.add("defaults.kind: command name {s} must match [A-Za-z0-9._-]", .{cn});
+                            return error.InvalidConfig;
+                        }
+                        const cmd_o = try obj(cmds_o.get(cn).?, diag, "defaults.kind.commands.name") orelse return error.InvalidConfig;
+                        try rejectUnknown(cmd_o, &.{"argv"}, diag, "defaults.kind.commands.name");
+                        const argv_val = cmd_o.get("argv") orelse {
+                            diag.add("defaults.kind: command {s} must declare argv", .{cn});
+                            return error.InvalidConfig;
+                        };
+                        const argv = try strArray(argv_val, diag, "defaults.kind.commands.name.argv") orelse return error.InvalidConfig;
+                        try validateArgvTokens(argv, diag, "defaults.kind.commands.name.argv");
+                        try def_names.append(cn);
+                        try def_argv.append(argv);
+                    }
+                    kd.cmd_names = try def_names.toOwnedSlice();
+                    kd.cmd_argv = try def_argv.toOwnedSlice();
+                }
+                try defaults.put(alloc, k, kd);
             }
         } else if (std.mem.eql(u8, key, "repos")) {
             const arr = try array(v, diag, "repos") orelse return error.InvalidConfig;
@@ -197,7 +232,7 @@ pub fn load(ctx: *const process.Ctx, path: []const u8, diag: *Diag) LoadError!Co
 fn parseRepo(
     ctx: *const process.Ctx,
     v: std.json.Value,
-    defaults: *const std.array_hash_map.String([]const []const u8),
+    defaults: *const std.array_hash_map.String(KindDefaults),
     diag: *Diag,
 ) LoadError!?Repo {
     const alloc = ctx.alloc;
@@ -263,8 +298,8 @@ fn parseRepo(
         const argv = try strArray(argv_val, diag, "repos[{d}].check.argv") orelse return null;
         try validateArgvTokens(argv, diag, "repos[{d}].check.argv");
         check = argv;
-    } else if (defaults.get(@tagName(kind))) |argv| {
-        check = argv;
+    } else if (defaults.get(@tagName(kind))) |kd| {
+        check = kd.check;
     }
 
     var rag: ?Rag = null;
@@ -327,6 +362,23 @@ fn parseRepo(
             try validateArgvTokens(argv, diag, "repos[{d}].commands.{s}.argv");
             try cmd_names.append(k);
             try cmd_argv.append(argv);
+        }
+    }
+
+    // Merge kind-default commands; repo-level entries win on name collision.
+    if (defaults.get(@tagName(kind))) |kd| {
+        for (kd.cmd_names, 0..) |kn, ki| {
+            var already = false;
+            for (cmd_names.items) |existing| {
+                if (std.mem.eql(u8, existing, kn)) {
+                    already = true;
+                    break;
+                }
+            }
+            if (!already) {
+                try cmd_names.append(kn);
+                try cmd_argv.append(kd.cmd_argv[ki]);
+            }
         }
     }
 

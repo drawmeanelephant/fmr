@@ -8,6 +8,7 @@ const config = @import("config.zig");
 const sync = @import("sync.zig");
 const status = @import("status.zig");
 const doctor = @import("doctor.zig");
+const exec = @import("exec.zig");
 const ui = @import("ui.zig");
 
 pub fn main(init: std.process.Init) u8 {
@@ -48,14 +49,20 @@ pub fn main(init: std.process.Init) u8 {
         } else if (cmd == null) {
             cmd = a;
         } else {
-            var exists = false;
-            for (repo_args.items) |existing| {
-                if (std.mem.eql(u8, existing, a)) {
-                    exists = true;
-                    break;
+            // For `run`, extra args after the command name must not be deduplicated
+            // since they are forwarded verbatim to the subprocess.
+            const is_run = std.mem.eql(u8, cmd.?, "run");
+            if (!is_run) {
+                var exists = false;
+                for (repo_args.items) |existing| {
+                    if (std.mem.eql(u8, existing, a)) {
+                        exists = true;
+                        break;
+                    }
                 }
+                if (exists) continue;
             }
-            if (!exists) repo_args.append(a) catch return 1;
+            repo_args.append(a) catch return 1;
         }
     }
 
@@ -101,9 +108,26 @@ pub fn main(init: std.process.Init) u8 {
     } else if (std.mem.eql(u8, c, "doctor")) {
         if (repo_args.items.len > 0) return usage(&ctx, "doctor takes no repo arguments");
         return doctor.run(&ctx, &cfg, &pr);
-    } else if (std.mem.eql(u8, c, "check") or std.mem.eql(u8, c, "rag") or std.mem.eql(u8, c, "run")) {
-        process.stderrLineNewline(&ctx, "fmr {s}: not implemented in this build (planned for slices 1-2)", .{c});
-        process.stderrLineNewline(&ctx, "available commands: status, sync, doctor", .{});
+    } else if (std.mem.eql(u8, c, "check")) {
+        if (repo_args.items.len > 0) {
+            if (unknownRepo(&ctx, &cfg, repo_args.items)) return 2;
+        }
+        var names = ArrayList([]const u8).init(ctx.alloc);
+        if (repo_args.items.len > 0) {
+            names.appendSlice(repo_args.items) catch return 1;
+        } else {
+            for (cfg.repos) |*r| names.append(r.name) catch return 1;
+        }
+        return exec.runCheck(&ctx, &cfg, names.items, &pr);
+    } else if (std.mem.eql(u8, c, "run")) {
+        if (repo_args.items.len < 2) return usage(&ctx, "run requires <repo> <command>");
+        const run_repo = repo_args.items[0];
+        const run_cmd = repo_args.items[1];
+        const run_extra = repo_args.items[2..];
+        return exec.runCmd(&ctx, &cfg, run_repo, run_cmd, run_extra, &pr);
+    } else if (std.mem.eql(u8, c, "rag")) {
+        process.stderrLineNewline(&ctx, "fmr rag: not implemented in this build (planned for slice 2)", .{});
+        process.stderrLineNewline(&ctx, "available commands: status, sync, doctor, check, run", .{});
         return 2;
     } else {
         return usage(&ctx, "unknown command");
@@ -139,14 +163,14 @@ fn unknownRepo(ctx: *const process.Ctx, cfg: *const config.Config, names: []cons
 fn help(ctx: *const process.Ctx) u8 {
     process.stderrLineNewline(ctx, "fmr — Workspace Manager in Zig", .{});
     process.stderrLineNewline(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>]", .{});
-    process.stderrLineNewline(ctx, "commands: status | sync | doctor", .{});
+    process.stderrLineNewline(ctx, "commands: status | sync | doctor | check | run <repo> <cmd> [args...]", .{});
     return 0;
 }
 
 fn usage(ctx: *const process.Ctx, reason: []const u8) u8 {
     if (reason.len > 0) process.stderrLineNewline(ctx, "fmr: {s}", .{reason});
     process.stderrLineNewline(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>]", .{});
-    process.stderrLineNewline(ctx, "commands: status | sync | doctor", .{});
+    process.stderrLineNewline(ctx, "commands: status | sync | doctor | check | run <repo> <cmd> [args...]", .{});
     return 2;
 }
 
@@ -159,4 +183,5 @@ test {
     _ = @import("status.zig");
     _ = @import("doctor.zig");
     _ = @import("ui.zig");
+    _ = @import("exec.zig");
 }
