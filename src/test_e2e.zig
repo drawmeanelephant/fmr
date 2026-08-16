@@ -342,7 +342,7 @@ fn mainImpl(init: std.process.Init) !u8 {
     current = "status reports all repos";
     {
         const args = base_args.items;
-        const res = try fmrRun(&ctx, args, &.{ "status" }, &pr_env);
+        const res = try fmrRun(&ctx, args, &.{"status"}, &pr_env);
         expect(&ctx, res.ok(), "status exits 0");
         expect(&ctx, std.mem.indexOf(u8, res.stdout, "alpha") != null, "lists alpha");
         expect(&ctx, std.mem.indexOf(u8, res.stdout, "unborn") != null, "lists unborn");
@@ -353,18 +353,18 @@ fn mainImpl(init: std.process.Init) !u8 {
     current = "doctor flags missing root then passes";
     {
         const args = base_args.items;
-        const res = try fmrRun(&ctx, args, &.{ "doctor" }, &pr_env);
+        const res = try fmrRun(&ctx, args, &.{"doctor"}, &pr_env);
         expectExit(&ctx, res, 1, "exit 1 with missing source-rag root");
         expect(&ctx, std.mem.indexOf(u8, res.stdout, "source-rag") != null, "names the missing root");
         try std.Io.Dir.cwd().createDirPath(ctx.io, rag_root);
-        const res2 = try fmrRun(&ctx, args, &.{ "doctor" }, &pr_env);
+        const res2 = try fmrRun(&ctx, args, &.{"doctor"}, &pr_env);
         expect(&ctx, res2.ok(), "exit 0 after creating roots");
     }
 
     current = "unknown command and repo are exit 2";
     {
         const args = base_args.items;
-        const res = try fmrRun(&ctx, args, &.{ "frobnicate" }, &pr_env);
+        const res = try fmrRun(&ctx, args, &.{"frobnicate"}, &pr_env);
         expectExit(&ctx, res, 2, "unknown command exits 2");
         const res2 = try fmrRun(&ctx, args, &.{ "sync", "nope" }, &pr_env);
         expectExit(&ctx, res2, 2, "unknown repo exits 2");

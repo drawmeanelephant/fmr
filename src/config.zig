@@ -90,7 +90,7 @@ pub const Diag = struct {
     }
 };
 
-pub const LoadError = error{ InvalidConfig } || std.mem.Allocator.Error;
+pub const LoadError = error{InvalidConfig} || std.mem.Allocator.Error;
 
 pub fn load(ctx: *const process.Ctx, path: []const u8, diag: *Diag) LoadError!Config {
     const alloc = ctx.alloc;
