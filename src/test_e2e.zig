@@ -132,10 +132,17 @@ fn mainImpl(init: std.process.Init) !u8 {
         \\       "commands": {{
         \\         "show-env": {{ "argv": ["sh", "-c", "echo FMR=$FMR_REPO"] }},
         \\         "echo-it": {{ "argv": ["echo"] }}
-        \\       }} }}
+        \\       }} }},
+        \\    {{ "name": "rag-cmd", "url": "{s}/rag-cmd.git", "default_branch": "main",
+        \\       "rag": {{ "command": {{ "argv": ["sh", "-c", "echo hello > $FMR_RAG_OUT/test.txt"] }} }} }},
+        \\    {{ "name": "rag-files", "url": "{s}/rag-files.git", "default_branch": "main",
+        \\       "rag": {{ "files": {{ "globs": ["*.txt", "*.md"], "max_depth": 2 }} }} }},
+        \\    {{ "name": "rag-fail", "url": "{s}/rag-fail.git", "default_branch": "main",
+        \\       "rag": {{ "command": {{ "argv": ["false"] }} }} }},
+        \\    {{ "name": "rag-skip", "url": "{s}/rag-skip.git", "default_branch": "main" }}
         \\  ]
         \\}}
-    , .{ repos_root, wt_root, rag_root, origins, origins, origins, origins, origins, origins, origins, origins, origins, origins, origins });
+    , .{ repos_root, wt_root, rag_root, origins, origins, origins, origins, origins, origins, origins, origins, origins, origins, origins, origins, origins, origins, origins });
     try std.Io.Dir.cwd().writeFile(ctx.io, .{ .sub_path = config_path, .data = config_json });
 
     const init_src = try std.Io.Dir.path.join(ctx.alloc, &.{ tmp, "init-src" });
@@ -154,8 +161,8 @@ fn mainImpl(init: std.process.Init) !u8 {
     try initRepo(&ctx, try std.Io.Dir.path.join(ctx.alloc, &.{ tmp, "wt-src" }), "main");
     try makeBareOrigin(&ctx, try std.Io.Dir.path.join(ctx.alloc, &.{ tmp, "wt-src" }), try std.Io.Dir.path.join(ctx.alloc, &.{ origins, "wt.git" }));
 
-    // Create bare origins for check/run fixture repos (reuse init_src history).
-    for (&[_][]const u8{ "check-kd", "check-ex", "check-skip", "check-fail", "cmd-repo" }) |rn| {
+    // Create bare origins for check/run/rag fixture repos (reuse init_src history).
+    for (&[_][]const u8{ "check-kd", "check-ex", "check-skip", "check-fail", "cmd-repo", "rag-cmd", "rag-files", "rag-fail", "rag-skip" }) |rn| {
         const bare = try std.fmt.allocPrint(ctx.alloc, "{s}/{s}.git", .{ origins, rn });
         try makeBareOrigin(&ctx, init_src, bare);
     }
@@ -551,6 +558,136 @@ fn mainImpl(init: std.process.Init) !u8 {
         expectExit(&ctx, res, 2, "exit 2 for unknown command");
         expect(&ctx, std.mem.indexOf(u8, res.stderr, "nope") != null, "names the unknown command");
         expect(&ctx, std.mem.indexOf(u8, res.stderr, "available commands") != null, "lists available commands");
+    }
+
+    // -------------------------------------------------------------------
+    // Slice-2: rag snapshot scenarios
+    // -------------------------------------------------------------------
+
+    // Sync rag fixture repos before running rag against them.
+    for (&[_][]const u8{ "rag-cmd", "rag-files", "rag-fail", "rag-skip" }) |rn| {
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "sync", rn }, &pr_env);
+        expect(&ctx, res.ok(), try std.fmt.allocPrint(ctx.alloc, "sync {s} exits 0", .{rn}));
+    }
+
+    current = "rag command mode creates snapshot and current symlink";
+    {
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "rag", "rag-cmd" }, &pr_env);
+        expectExit(&ctx, res, 0, "rag rag-cmd exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "[ok]") != null, "reports [ok]");
+
+        const rag_cmd_dir = try std.Io.Dir.path.join(ctx.alloc, &.{ repos_root, "rag-cmd" });
+        const sha = (try git.fullSha(&ctx, rag_cmd_dir)) orelse "";
+        const snap_dir = try std.Io.Dir.path.join(ctx.alloc, &.{ rag_root, "rag-cmd", sha });
+        const snap_file = try std.Io.Dir.path.join(ctx.alloc, &.{ snap_dir, "test.txt" });
+        expect(&ctx, git.dirExists(&ctx, snap_file), "test.txt exported in snapshot");
+
+        const snap_manifest = try std.Io.Dir.path.join(ctx.alloc, &.{ snap_dir, "manifest.json" });
+        expect(&ctx, git.dirExists(&ctx, snap_manifest), "manifest.json created");
+
+        const cur_link = try std.Io.Dir.path.join(ctx.alloc, &.{ rag_root, "rag-cmd", "current" });
+        var buf: [1024]u8 = undefined;
+        const n = std.Io.Dir.cwd().readLink(ctx.io, cur_link, &buf) catch 0;
+        expect(&ctx, n > 0, "current symlink created");
+        expect(&ctx, std.mem.eql(u8, buf[0..n], sha), "current points to full sha");
+    }
+
+    current = "rag idempotency on unchanged HEAD";
+    {
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "rag", "rag-cmd" }, &pr_env);
+        expectExit(&ctx, res, 0, "second rag exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "up to date") != null, "reports up to date");
+    }
+
+    current = "rag --force replaces snapshot";
+    {
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "rag", "rag-cmd", "--force" }, &pr_env);
+        expectExit(&ctx, res, 0, "forced rag exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "rag snap") != null, "reports rag snap");
+    }
+
+    current = "rag failure returns exit 4 and leaves current untouched";
+    {
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "rag", "rag-fail" }, &pr_env);
+        expectExit(&ctx, res, 4, "failing exporter exits 4");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "[fail]") != null, "reports [fail]");
+    }
+
+    current = "rag skip when no rag configured";
+    {
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "rag", "rag-skip" }, &pr_env);
+        expectExit(&ctx, res, 0, "skip rag exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "[skip]") != null, "reports [skip]");
+    }
+
+    current = "rag files mode copies matching globs";
+    {
+        const rf_dir = try std.Io.Dir.path.join(ctx.alloc, &.{ repos_root, "rag-files" });
+        const doc_path = try std.Io.Dir.path.join(ctx.alloc, &.{ rf_dir, "doc.md" });
+        var df = try std.Io.Dir.cwd().createFile(ctx.io, doc_path, .{ .truncate = true });
+        try df.writeStreamingAll(ctx.io, "# Markdown Doc");
+        df.close(ctx.io);
+
+        const sub_dir = try std.Io.Dir.path.join(ctx.alloc, &.{ rf_dir, "sub" });
+        try std.Io.Dir.cwd().createDirPath(ctx.io, sub_dir);
+        const note_path = try std.Io.Dir.path.join(ctx.alloc, &.{ sub_dir, "notes.txt" });
+        var nf = try std.Io.Dir.cwd().createFile(ctx.io, note_path, .{ .truncate = true });
+        try nf.writeStreamingAll(ctx.io, "notes");
+        nf.close(ctx.io);
+
+        const bin_path = try std.Io.Dir.path.join(ctx.alloc, &.{ rf_dir, "binary.bin" });
+        var bf = try std.Io.Dir.cwd().createFile(ctx.io, bin_path, .{ .truncate = true });
+        try bf.writeStreamingAll(ctx.io, "raw binary");
+        bf.close(ctx.io);
+
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "rag", "rag-files" }, &pr_env);
+        expectExit(&ctx, res, 0, "files mode rag exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "[ok]") != null, "reports [ok]");
+
+        const rf_sha = (try git.fullSha(&ctx, rf_dir)) orelse "";
+        const snap_doc = try std.Io.Dir.path.join(ctx.alloc, &.{ rag_root, "rag-files", rf_sha, "doc.md" });
+        const snap_note = try std.Io.Dir.path.join(ctx.alloc, &.{ rag_root, "rag-files", rf_sha, "sub", "notes.txt" });
+        const snap_bin = try std.Io.Dir.path.join(ctx.alloc, &.{ rag_root, "rag-files", rf_sha, "binary.bin" });
+
+        expect(&ctx, git.dirExists(&ctx, snap_doc), "doc.md copied into snapshot");
+        expect(&ctx, git.dirExists(&ctx, snap_note), "sub/notes.txt copied into snapshot");
+        expect(&ctx, !git.dirExists(&ctx, snap_bin), "binary.bin excluded from snapshot");
+    }
+
+    current = "rag dirty repo refuses without --force";
+    {
+        const rag_cmd_dir = try std.Io.Dir.path.join(ctx.alloc, &.{ repos_root, "rag-cmd" });
+        const f = try std.Io.Dir.path.join(ctx.alloc, &.{ rag_cmd_dir, "f.txt" });
+        var file = try std.Io.Dir.cwd().createFile(ctx.io, f, .{ .truncate = false });
+        const len = try file.length(ctx.io);
+        try file.writePositionalAll(ctx.io, "dirty", len);
+        file.close(ctx.io);
+
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "rag", "rag-cmd" }, &pr_env);
+        expectExit(&ctx, res, 3, "exit 3 on dirty rag");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "dirty") != null, "mentions dirty");
+
+        const res_forced = try fmrRun(&ctx, args, &.{ "rag", "rag-cmd", "--force" }, &pr_env);
+        expectExit(&ctx, res_forced, 0, "forced dirty rag exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res_forced.stdout, "rag snap") != null, "forced rag reports snap");
+
+        _ = try gitOk(&ctx, &.{ "git", "checkout", "--", "f.txt" }, rag_cmd_dir);
+    }
+
+    current = "status reports snap ok after rag";
+    {
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "status", "rag-cmd" }, &pr_env);
+        expectExit(&ctx, res, 0, "status rag-cmd exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "snap ok") != null, "status shows snap ok");
     }
 
     pr.line(&ctx, .gray, "e2e tmp dir kept for inspection on failure: {s}", .{tmp});
