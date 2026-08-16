@@ -690,6 +690,81 @@ fn mainImpl(init: std.process.Init) !u8 {
         expect(&ctx, std.mem.indexOf(u8, res.stdout, "snap ok") != null, "status shows snap ok");
     }
 
+    // -------------------------------------------------------------------
+    // Slices 3 & 4: doctor --fix, rag --gc, and --json output
+    // -------------------------------------------------------------------
+
+    current = "doctor --fix cleans stale locks and staging directories";
+    {
+        // 1. Create a fake stale lock directory with dead pid
+        const stale_lock_dir = try std.Io.Dir.path.join(ctx.alloc, &.{ home, ".fmr", "locks", "test-stale.sync.lock" });
+        try std.Io.Dir.cwd().createDirPath(ctx.io, stale_lock_dir);
+        const stale_pid_file = try std.Io.Dir.path.join(ctx.alloc, &.{ stale_lock_dir, "pid" });
+        var pf = try std.Io.Dir.cwd().createFile(ctx.io, stale_pid_file, .{ .truncate = true });
+        try pf.writeStreamingAll(ctx.io, "99999999\n");
+        pf.close(ctx.io);
+
+        // 2. Create a fake stale staging directory
+        const stale_staging_dir = try std.Io.Dir.path.join(ctx.alloc, &.{ rag_root, "rag-cmd", ".staging", "stale-pid-99999" });
+        try std.Io.Dir.cwd().createDirPath(ctx.io, stale_staging_dir);
+
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "doctor", "--fix" }, &pr_env);
+        expectExit(&ctx, res, 0, "doctor --fix exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "[fix]") != null, "doctor --fix reports fix actions");
+        expect(&ctx, !git.dirExists(&ctx, stale_lock_dir), "stale lock removed by doctor --fix");
+        expect(&ctx, !git.dirExists(&ctx, stale_staging_dir), "stale staging removed by doctor --fix");
+    }
+
+    current = "rag --gc prunes older snapshots while preserving current";
+    {
+        const rag_cmd_dir = try std.Io.Dir.path.join(ctx.alloc, &.{ rag_root, "rag-cmd" });
+        const old_snap1 = try std.Io.Dir.path.join(ctx.alloc, &.{ rag_cmd_dir, "0000000000000000000000000000000000000001" });
+        const old_snap2 = try std.Io.Dir.path.join(ctx.alloc, &.{ rag_cmd_dir, "0000000000000000000000000000000000000002" });
+        try std.Io.Dir.cwd().createDirPath(ctx.io, old_snap1);
+        try std.Io.Dir.cwd().createDirPath(ctx.io, old_snap2);
+
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "rag", "rag-cmd", "--gc", "1" }, &pr_env);
+        expectExit(&ctx, res, 0, "rag --gc exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "[gc]") != null, "reports [gc]");
+
+        // Current symlink must still exist
+        const cur_link = try std.Io.Dir.path.join(ctx.alloc, &.{ rag_root, "rag-cmd", "current" });
+        expect(&ctx, git.dirExists(&ctx, cur_link), "current symlink preserved after gc");
+    }
+
+    current = "json flag outputs structured json across commands";
+    {
+        const args = base_args.items;
+
+        // 1. status --json
+        const res_status = try fmrRun(&ctx, args, &.{ "status", "rag-cmd", "--json" }, &pr_env);
+        expectExit(&ctx, res_status, 0, "status --json exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res_status.stdout, "\"command\": \"status\"") != null, "status JSON has command status");
+        expect(&ctx, std.mem.indexOf(u8, res_status.stdout, "\"name\": \"rag-cmd\"") != null, "status JSON names repo");
+
+        // 2. sync --json
+        const res_sync = try fmrRun(&ctx, args, &.{ "sync", "rag-cmd", "--json" }, &pr_env);
+        expectExit(&ctx, res_sync, 0, "sync --json exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res_sync.stdout, "\"command\": \"sync\"") != null, "sync JSON has command sync");
+
+        // 3. doctor --json
+        const res_doc = try fmrRun(&ctx, args, &.{ "doctor", "--json" }, &pr_env);
+        expectExit(&ctx, res_doc, 0, "doctor --json exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res_doc.stdout, "\"command\": \"doctor\"") != null, "doctor JSON has command doctor");
+
+        // 4. check --json
+        const res_chk = try fmrRun(&ctx, args, &.{ "check", "check-kd", "--json" }, &pr_env);
+        expectExit(&ctx, res_chk, 0, "check --json exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res_chk.stdout, "\"command\": \"check\"") != null, "check JSON has command check");
+
+        // 5. rag --json
+        const res_rag = try fmrRun(&ctx, args, &.{ "rag", "rag-cmd", "--json" }, &pr_env);
+        expectExit(&ctx, res_rag, 0, "rag --json exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res_rag.stdout, "\"command\": \"rag\"") != null, "rag JSON has command rag");
+    }
+
     pr.line(&ctx, .gray, "e2e tmp dir kept for inspection on failure: {s}", .{tmp});
     if (failures > 0) {
         pr.line(&ctx, .red, "{d} e2e scenario(s) failed", .{failures});

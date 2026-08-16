@@ -109,6 +109,11 @@ pub fn load(ctx: *const process.Ctx, path: []const u8, diag: *Diag) LoadError!Co
     };
     defer alloc.free(contents);
 
+    const home_dir = process.home(ctx) orelse "";
+    return loadSlice(alloc, contents, path, home_dir, diag);
+}
+
+pub fn loadSlice(alloc: std.mem.Allocator, contents: []const u8, path: []const u8, home_dir: []const u8, diag: *Diag) LoadError!Config {
     var parsed = std.json.parseFromSlice(std.json.Value, alloc, contents, .{ .allocate = .alloc_always }) catch |err| {
         diag.add("config {s}: invalid JSON: {s}", .{ path, @errorName(err) });
         return error.InvalidConfig;
@@ -120,7 +125,6 @@ pub fn load(ctx: *const process.Ctx, path: []const u8, diag: *Diag) LoadError!Co
         return error.InvalidConfig;
     }
 
-    const home_dir = process.home(ctx) orelse "";
     const workspace_dir = std.Io.Dir.path.dirname(path) orelse ".";
     var cfg = Config{
         .allocator = alloc,
@@ -203,7 +207,7 @@ pub fn load(ctx: *const process.Ctx, path: []const u8, diag: *Diag) LoadError!Co
         } else if (std.mem.eql(u8, key, "repos")) {
             const arr = try array(v, diag, "repos") orelse return error.InvalidConfig;
             for (arr.items) |item| {
-                const r = try parseRepo(ctx, item, &defaults, diag) orelse return error.InvalidConfig;
+                const r = try parseRepo(alloc, item, &defaults, diag) orelse return error.InvalidConfig;
                 for (repos.items) |existing| {
                     if (std.mem.eql(u8, existing.name, r.name)) {
                         diag.add("repo {s}: duplicate name", .{r.name});
@@ -230,12 +234,11 @@ pub fn load(ctx: *const process.Ctx, path: []const u8, diag: *Diag) LoadError!Co
 }
 
 fn parseRepo(
-    ctx: *const process.Ctx,
+    alloc: std.mem.Allocator,
     v: std.json.Value,
     defaults: *const std.array_hash_map.String(KindDefaults),
     diag: *Diag,
 ) LoadError!?Repo {
-    const alloc = ctx.alloc;
     const o = try obj(v, diag, "repos[{d}]") orelse return null;
     try rejectUnknown(o, &.{ "name", "url", "kind", "default_branch", "worktree_safe", "sync", "check", "rag", "commands", "env" }, diag, "repos[{d}]");
     const name = try reqStr(o, "name", diag, "repos[{d}].name") orelse return null;
@@ -686,22 +689,44 @@ test "rejectUnknown allows underscore keys and known keys" {
     try rejectUnknown(parsed.value.object, &.{"a"}, &diag, "repos[0]");
 }
 
-test "empty repos array is valid" {
-    const alloc = std.testing.allocator;
-    const json_text =
-        \\{
-        \\  "paths": {
-        \\    "repos": "~/dev",
-        \\    "worktrees": "~/Code/worktrees",
-        \\    "sourceRag": "~/Code/source-rag"
-        \\  },
-        \\  "repos": []
-        \\}
-    ;
-    var parsed = try std.json.parseFromSlice(std.json.Value, alloc, json_text, .{ .allocate = .alloc_always });
-    defer parsed.deinit();
+test "parse full 13 repo production catalog example" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const example_json = @embedFile("workspace.example.json");
     var diag = Diag.init(alloc);
-    defer diag.deinit();
-    const p = try obj(parsed.value, &diag, "paths");
-    try std.testing.expect(p != null);
+
+    const cfg = loadSlice(alloc, example_json, "/Users/t/config/fmr/workspace.json", "/Users/t", &diag) catch |err| {
+        if (diag.msgs.items.len > 0) {
+            std.debug.print("parse error: {s}\n", .{diag.msgs.items[0]});
+        }
+        return err;
+    };
+
+    try std.testing.expectEqual(@as(usize, 13), cfg.repos.len);
+    try std.testing.expect(cfg.findRepo("boris") != null);
+    try std.testing.expect(cfg.findRepo("DipshitOS") != null);
+    try std.testing.expect(cfg.findRepo("oliver") != null);
+    try std.testing.expect(cfg.findRepo("know") != null);
+    try std.testing.expect(cfg.findRepo("codex-limits") != null);
+    try std.testing.expect(cfg.findRepo("fullonrogues.org") != null);
+    try std.testing.expect(cfg.findRepo("rotkeeper") != null);
+    try std.testing.expect(cfg.findRepo("minutes-without-motion") != null);
+    try std.testing.expect(cfg.findRepo("la-famille") != null);
+    try std.testing.expect(cfg.findRepo("filed.fyi") != null);
+    try std.testing.expect(cfg.findRepo("apex") != null);
+    try std.testing.expect(cfg.findRepo("thermalextractiondevices.com") != null);
+    try std.testing.expect(cfg.findRepo("corgifever.com") != null);
+    try std.testing.expect(cfg.findRepo("rustodian") == null);
+
+    // Verify kind-default inheritance on zig and go
+    const boris = cfg.findRepo("boris").?;
+    try std.testing.expect(boris.check != null);
+    try std.testing.expectEqualStrings("afterparty", boris.default_branch.?);
+    try std.testing.expect(boris.worktree_safe);
+
+    const know = cfg.findRepo("know").?;
+    try std.testing.expect(know.check != null);
+    try std.testing.expectEqualStrings("go", know.check.?[0]);
 }

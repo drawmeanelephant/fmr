@@ -27,6 +27,9 @@ pub fn main(init: std.process.Init) u8 {
     var config_path: ?[]const u8 = null;
     var jobs: ?usize = null;
     var force = false;
+    var fix = false;
+    var gc_keep: ?usize = null;
+    var json_out = false;
     var cmd: ?[]const u8 = null;
     var repo_args = ArrayList([]const u8).init(ctx.alloc);
 
@@ -44,8 +47,16 @@ pub fn main(init: std.process.Init) u8 {
             if (i >= argv.items.len) return usage(&ctx, "missing value after --jobs");
             jobs = std.fmt.parseInt(usize, argv.items[i], 10) catch return usage(&ctx, "--jobs expects a positive integer");
             if (jobs.? == 0) return usage(&ctx, "--jobs expects a positive integer");
+        } else if (std.mem.eql(u8, a, "--gc")) {
+            i += 1;
+            if (i >= argv.items.len) return usage(&ctx, "missing count after --gc");
+            gc_keep = std.fmt.parseInt(usize, argv.items[i], 10) catch return usage(&ctx, "--gc expects an integer");
         } else if (std.mem.eql(u8, a, "--force") or std.mem.eql(u8, a, "-f")) {
             force = true;
+        } else if (std.mem.eql(u8, a, "--fix")) {
+            fix = true;
+        } else if (std.mem.eql(u8, a, "--json")) {
+            json_out = true;
         } else if (std.mem.eql(u8, a, "-a") or std.mem.eql(u8, a, "--all")) {
             continue;
         } else if (a.len > 0 and a[0] == '-') {
@@ -99,7 +110,7 @@ pub fn main(init: std.process.Init) u8 {
         } else {
             for (cfg.repos) |*r| names.append(r.name) catch return 1;
         }
-        return status.run(&ctx, &cfg, names.items, &pr);
+        return status.run(&ctx, &cfg, names.items, json_out, &pr);
     } else if (std.mem.eql(u8, c, "sync")) {
         if (unknownRepo(&ctx, &cfg, repo_args.items)) return 2;
         var names = ArrayList([]const u8).init(ctx.alloc);
@@ -108,10 +119,10 @@ pub fn main(init: std.process.Init) u8 {
         } else {
             for (cfg.repos) |*r| names.append(r.name) catch return 1;
         }
-        return sync.run(&ctx, &cfg, names.items, jobs orelse cfg.parallelism.sync, &pr);
+        return sync.run(&ctx, &cfg, names.items, jobs orelse cfg.parallelism.sync, json_out, &pr);
     } else if (std.mem.eql(u8, c, "doctor")) {
         if (repo_args.items.len > 0) return usage(&ctx, "doctor takes no repo arguments");
-        return doctor.run(&ctx, &cfg, &pr);
+        return doctor.run(&ctx, &cfg, fix, json_out, &pr);
     } else if (std.mem.eql(u8, c, "check")) {
         if (repo_args.items.len > 0) {
             if (unknownRepo(&ctx, &cfg, repo_args.items)) return 2;
@@ -122,7 +133,7 @@ pub fn main(init: std.process.Init) u8 {
         } else {
             for (cfg.repos) |*r| names.append(r.name) catch return 1;
         }
-        return exec.runCheck(&ctx, &cfg, names.items, &pr);
+        return exec.runCheck(&ctx, &cfg, names.items, json_out, &pr);
     } else if (std.mem.eql(u8, c, "run")) {
         if (repo_args.items.len < 2) return usage(&ctx, "run requires <repo> <command>");
         const run_repo = repo_args.items[0];
@@ -139,7 +150,7 @@ pub fn main(init: std.process.Init) u8 {
         } else {
             for (cfg.repos) |*r| names.append(r.name) catch return 1;
         }
-        return rag.run(&ctx, &cfg, names.items, force, &pr);
+        return rag.run(&ctx, &cfg, names.items, force, gc_keep, json_out, &pr);
     } else {
         return usage(&ctx, "unknown command");
     }
@@ -173,14 +184,14 @@ fn unknownRepo(ctx: *const process.Ctx, cfg: *const config.Config, names: []cons
 
 fn help(ctx: *const process.Ctx) u8 {
     process.stderrLineNewline(ctx, "fmr — Workspace Manager in Zig", .{});
-    process.stderrLineNewline(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>] [--force]", .{});
+    process.stderrLineNewline(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>] [--force] [--fix] [--gc <n>] [--json]", .{});
     process.stderrLineNewline(ctx, "commands: status | sync | doctor | check | run | rag", .{});
     return 0;
 }
 
 fn usage(ctx: *const process.Ctx, reason: []const u8) u8 {
     if (reason.len > 0) process.stderrLineNewline(ctx, "fmr: {s}", .{reason});
-    process.stderrLineNewline(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>] [--force]", .{});
+    process.stderrLineNewline(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>] [--force] [--fix] [--gc <n>] [--json]", .{});
     process.stderrLineNewline(ctx, "commands: status | sync | doctor | check | run | rag", .{});
     return 2;
 }

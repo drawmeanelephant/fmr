@@ -173,9 +173,12 @@ fmr <command> [repo...] [flags]
 
 | Command | Description |
 |---|---|
-| `fmr status [repo...]` | Read-only parallel inspection of git and snapshot state across all or specified repos. |
-| `fmr sync [repo...]` | Safely fetches and fast-forwards primary checkouts (or clones if missing). |
-| `fmr doctor` | Runs offline health checks: directory existence, root overlaps, worktree branch hygiene, disk space, and stale locks. |
+| `fmr status [repo...] [--json]` | Read-only parallel inspection of git and snapshot state across all or specified repos. |
+| `fmr sync [repo...] [--jobs <n>] [--json]` | Safely fetches and fast-forwards primary checkouts (or clones if missing). |
+| `fmr doctor [--fix] [--json]` | Runs offline health checks. Pass `--fix` to prune stale locks, dead-pid locks, and abandoned staging dirs. |
+| `fmr check [repo...] [--json]` | Executes repo test/check command or inherited `kind` default check. |
+| `fmr run <repo> <command> [args...]` | Runs a configured custom command for a repository with environment variable injection. |
+| `fmr rag [repo...] [--force] [--gc <n>] [--json]` | Generates immutable RAG snapshots and updates `current` symlinks. Supports retention GC (`--gc <n>`). |
 | `fmr --help`, `-h` | Prints usage and command options. |
 
 ### Flags
@@ -184,6 +187,10 @@ fmr <command> [repo...] [flags]
 |---|---|
 | `--config <path>` | Path to custom `workspace.json`. Defaults to `~/config/fmr/workspace.json`. |
 | `--jobs <n>` | Number of concurrent worker threads for sync operations. |
+| `--force`, `-f` | Forces RAG snapshot generation even on dirty repositories or re-exports existing HEAD. |
+| `--fix` | Remediates stale lock files and orphaned staging directories during `fmr doctor`. |
+| `--gc <n>` | Retention garbage collection for `fmr rag`: retains newest `n` snapshots plus the active `current` target. |
+| `--json` | Emits clean, machine-readable structured JSON to stdout. |
 | `--all`, `-a` | Process all configured repositories (default when no repos specified). |
 
 ### Exit Code Contract
@@ -196,7 +203,7 @@ Multi-repo operations aggregate exit codes (highest severity wins):
 | `1` | **Unexpected Error** | File I/O failure, internal error, or lock acquisition error. |
 | `2` | **Usage / CLI Error** | Unknown command, unknown repo name, or invalid arguments. |
 | `3` | **Safety Refusal** | Refused due to dirty tree, ahead/diverged branch, detached HEAD, worktree conflict, or lock contention. |
-| `4` | **Subprocess Failed** | A spawned command (e.g. `git clone`, `git fetch`, test suite) returned a non-zero exit code. |
+| `4` | **Subprocess Failed** | A spawned command (e.g. `git clone`, `git fetch`, test suite, exporter) returned a non-zero exit code. |
 | `5` | **Config Invalid** | JSON syntax error, missing required field, unknown key, or bad repo name. |
 
 ---
@@ -217,20 +224,21 @@ Compiled binary will be installed to `zig-out/bin/fmr`.
 ```bash
 zig build test
 ```
-Runs all 24 unit test cases covering config parsing, validation, placeholder expansion, path expansion, and state machine decision logic.
+Runs all 29 unit test cases covering config parsing, validation, 13-repo catalog verification, placeholder expansion, path expansion, and state machine decision logic.
 
 ### End-to-End Fixture Tests
 ```bash
 zig build test-e2e
 ```
-Runs 25 automated scenario suites (61+ assertions) against real temporary git fixtures to verify cloning, fast-forwarding, refusals, locks, and doctor diagnostics.
+Runs 35 automated scenario suites (120+ assertions) against real temporary git fixtures to verify cloning, fast-forwarding, refusals, locks, named commands, RAG export pipelines, doctor remediation, GC pruning, and JSON outputs.
 
 ---
 
 ## 7. Implementation Roadmap
 
 - [x] **Slice 0**: Core CLI scaffold, config engine with `_` comments, git state matrix, `fmr status`, `fmr sync` with thread isolation & atomic queue, `fmr doctor`, per-repo mkdir locks, and comprehensive test suite.
-- [ ] **Slice 1**: Named commands execution (`fmr check`, `fmr run`), default checks by repo kind.
-- [ ] **Slice 2**: RAG snapshot pipeline (`fmr rag`), SHA snapshot directories, atomic symlink swap (`current`), command and files glob exporters.
-- [ ] **Slice 3**: Exporter migration for 13 production repos and Go tooling.
-- [ ] **Slice 4**: Retirement of legacy bash scripts, snapshot retention GC (`--gc <n>`), and `--json` machine output.
+- [x] **Slice 1**: Named commands execution (`fmr check`, `fmr run`), default checks by repo kind (`zig`, `go`, `node`).
+- [x] **Slice 2**: RAG snapshot pipeline (`fmr rag`), SHA snapshot directories, atomic symlink swap (`current`), command and files glob exporters.
+- [x] **Slice 3**: Complete 13-repository catalog definition (`config/workspace.example.json`), multi-kind defaults, and backward compatibility.
+- [x] **Slice 4**: Remediation suite (`fmr doctor --fix`), snapshot retention GC (`fmr rag --gc <n>`), and universal structured machine output (`--json`).
+
