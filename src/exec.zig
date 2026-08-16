@@ -23,9 +23,18 @@ pub fn runCheck(
     ctx: *const process.Ctx,
     cfg: *const config.Config,
     names: []const []const u8,
+    json_out: bool,
     pr: *const ui.Printer,
 ) u8 {
     var max_exit: u8 = 0;
+    const Entry = struct {
+        name: []const u8,
+        status: []const u8,
+        exit: u8,
+        message: []const u8,
+    };
+    var entries = ArrayList(Entry).init(ctx.alloc);
+
     for (names) |name| {
         const repo = cfg.findRepo(name) orelse {
             // Caller (main.zig) pre-validates names; this is a safety net.
@@ -33,7 +42,8 @@ pub fn runCheck(
             return 2;
         };
         const check_argv = repo.check orelse {
-            pr.line(ctx, .gray, "[skip] {s}: no check defined", .{name});
+            if (!json_out) pr.line(ctx, .gray, "[skip] {s}: no check defined", .{name});
+            entries.append(.{ .name = name, .status = "skipped", .exit = 0, .message = "no check defined" }) catch return 1;
             continue;
         };
         const repo_path = buildRepoPath(ctx, cfg, name) orelse return 1;
@@ -42,18 +52,51 @@ pub fn runCheck(
             .cwd = repo_path,
             .env = repo.env,
         }) catch {
-            process.stderrLineNewline(ctx, "fmr: failed to spawn check for '{s}'", .{name});
+            if (!json_out) process.stderrLineNewline(ctx, "fmr: failed to spawn check for '{s}'", .{name});
+            entries.append(.{ .name = name, .status = "failed", .exit = 4, .message = "failed to spawn check" }) catch return 1;
             if (4 > max_exit) max_exit = 4;
             continue;
         };
         if (res.ok()) {
-            pr.line(ctx, .green, "[ok] {s}", .{name});
+            if (!json_out) pr.line(ctx, .green, "[ok] {s}", .{name});
+            entries.append(.{ .name = name, .status = "ok", .exit = 0, .message = "check passed" }) catch return 1;
         } else {
             const code = res.exited() orelse 1;
-            pr.line(ctx, .red, "[fail] {s}: {s} exited with code {d}", .{ name, expanded[0], code });
+            if (!json_out) pr.line(ctx, .red, "[fail] {s}: {s} exited with code {d}", .{ name, expanded[0], code });
+            const msg = std.fmt.allocPrint(ctx.alloc, "{s} exited with code {d}", .{ expanded[0], code }) catch "failed";
+            entries.append(.{ .name = name, .status = "failed", .exit = 4, .message = msg }) catch return 1;
             if (4 > max_exit) max_exit = 4;
         }
     }
+
+    if (json_out) {
+        var buf = ArrayList(u8).init(ctx.alloc);
+        buf.appendSlice("{\n  \"version\": 1,\n  \"command\": \"check\",\n") catch return 1;
+        const exit_line = std.fmt.allocPrint(ctx.alloc, "  \"exit\": {d},\n  \"repos\": [\n", .{max_exit}) catch return 1;
+        buf.appendSlice(exit_line) catch return 1;
+
+        for (entries.items, 0..) |e, i| {
+            const item = std.fmt.allocPrint(ctx.alloc,
+                \\    {{
+                \\      "name": "{s}",
+                \\      "status": "{s}",
+                \\      "exit": {d},
+                \\      "message": "{s}"
+                \\    }}{s}
+                \\
+            , .{
+                e.name,
+                e.status,
+                e.exit,
+                e.message,
+                if (i + 1 < entries.items.len) "," else "",
+            }) catch return 1;
+            buf.appendSlice(item) catch return 1;
+        }
+        buf.appendSlice("  ]\n}\n") catch return 1;
+        std.Io.File.stdout().writeStreamingAll(ctx.io, buf.items) catch {};
+    }
+
     return max_exit;
 }
 

@@ -17,13 +17,64 @@ const Check = struct {
 
 const min_free_kib: usize = 1 << 20;
 
-pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, pr: *ui.Printer) u8 {
+pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, fix: bool, json_out: bool, pr: *ui.Printer) u8 {
+    if (fix) {
+        fixStale(ctx, cfg, pr) catch {
+            process.stderrLineNewline(ctx, "fmr doctor --fix: failed during remediation", .{});
+        };
+    }
+
     const checks = runChecks(ctx, cfg) catch {
         process.stderrLineNewline(ctx, "fmr doctor: internal error", .{});
         return 1;
     };
     var problems: usize = 0;
     var warns: usize = 0;
+    for (checks) |c| {
+        if (c.level == .problem) problems += 1;
+        if (c.level == .warn) warns += 1;
+    }
+
+    if (json_out) {
+        var buf = ArrayList(u8).init(ctx.alloc);
+        buf.appendSlice("{\n  \"version\": 1,\n  \"command\": \"doctor\",\n") catch return 1;
+        const exit_num: u8 = if (problems > 0) 1 else 0;
+        const header = std.fmt.allocPrint(ctx.alloc, "  \"exit\": {d},\n  \"problems\": {d},\n  \"warnings\": {d},\n  \"checks\": [\n", .{ exit_num, problems, warns }) catch return 1;
+        buf.appendSlice(header) catch return 1;
+
+        for (checks, 0..) |c, i| {
+            const level_str = @tagName(c.level);
+            // Escape any quotes in message
+            var clean_msg = ArrayList(u8).init(ctx.alloc);
+            for (c.msg) |ch| {
+                if (ch == '"') {
+                    clean_msg.appendSlice("\\\"") catch return 1;
+                } else if (ch == '\\') {
+                    clean_msg.appendSlice("\\\\") catch return 1;
+                } else {
+                    clean_msg.append(ch) catch return 1;
+                }
+            }
+
+            const entry = std.fmt.allocPrint(ctx.alloc,
+                \\    {{
+                \\      "level": "{s}",
+                \\      "message": "{s}"
+                \\    }}{s}
+                \\
+            , .{
+                level_str,
+                clean_msg.items,
+                if (i + 1 < checks.len) "," else "",
+            }) catch return 1;
+            buf.appendSlice(entry) catch return 1;
+        }
+
+        buf.appendSlice("  ]\n}\n") catch return 1;
+        std.Io.File.stdout().writeStreamingAll(ctx.io, buf.items) catch {};
+        return exit_num;
+    }
+
     for (checks) |c| {
         const color: ui.Color = switch (c.level) {
             .ok => .green,
@@ -35,12 +86,59 @@ pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, pr: *ui.Printer) 
             .warn => "warn",
             .problem => "problem",
         };
-        if (c.level == .problem) problems += 1;
-        if (c.level == .warn) warns += 1;
         pr.line(ctx, color, "[{s}] {s}", .{ tag, c.msg });
     }
     pr.raw(ctx, "doctor: {d} problems, {d} warnings", .{ problems, warns });
     return if (problems > 0) 1 else 0;
+}
+
+pub fn fixStale(ctx: *const process.Ctx, cfg: *const config.Config, pr: *ui.Printer) !void {
+    const home_dir = process.home(ctx) orelse return;
+
+    // 1. Clean stale locks
+    inline for (.{ ".fmr", ".yard" }) |base_name| {
+        const locks_dir = try std.Io.Dir.path.join(ctx.alloc, &.{ home_dir, base_name, "locks" });
+        if (std.Io.Dir.cwd().openDir(ctx.io, locks_dir, .{ .iterate = true })) |dir_val| {
+            var dir = dir_val;
+            defer dir.close(ctx.io);
+            var it = dir.iterate();
+            while (it.next(ctx.io) catch null) |entry| {
+                if (entry.kind != .directory) continue;
+                const lock_path = try std.Io.Dir.path.join(ctx.alloc, &.{ locks_dir, entry.name });
+                const pid_path = try std.Io.Dir.path.join(ctx.alloc, &.{ lock_path, "pid" });
+                if (std.Io.Dir.cwd().readFileAlloc(ctx.io, pid_path, ctx.alloc, .limited(64))) |pid_text| {
+                    defer ctx.alloc.free(pid_text);
+                    if (std.fmt.parseInt(i32, std.mem.trim(u8, pid_text, " \t\r\n"), 10)) |pid| {
+                        if (!pidAlive(pid)) {
+                            std.Io.Dir.cwd().deleteTree(ctx.io, lock_path) catch {};
+                            pr.line(ctx, .yellow, "[fix] removed stale lock {s} (dead pid {d})", .{ entry.name, pid });
+                        }
+                    } else |_| {
+                        std.Io.Dir.cwd().deleteTree(ctx.io, lock_path) catch {};
+                        pr.line(ctx, .yellow, "[fix] removed invalid lock {s}", .{entry.name});
+                    }
+                } else |_| {
+                    std.Io.Dir.cwd().deleteTree(ctx.io, lock_path) catch {};
+                    pr.line(ctx, .yellow, "[fix] removed empty lock {s}", .{entry.name});
+                }
+            }
+        } else |_| {}
+    }
+
+    // 2. Clean stale staging directories in source-rag
+    for (cfg.repos) |*r| {
+        const staging_root = try std.Io.Dir.path.join(ctx.alloc, &.{ cfg.paths.source_rag, r.name, ".staging" });
+        if (std.Io.Dir.cwd().openDir(ctx.io, staging_root, .{ .iterate = true })) |sdir_val| {
+            var sdir = sdir_val;
+            defer sdir.close(ctx.io);
+            var it = sdir.iterate();
+            while (it.next(ctx.io) catch null) |entry| {
+                const sub_staging = try std.Io.Dir.path.join(ctx.alloc, &.{ staging_root, entry.name });
+                std.Io.Dir.cwd().deleteTree(ctx.io, sub_staging) catch {};
+                pr.line(ctx, .yellow, "[fix] removed stale staging directory {s}", .{entry.name});
+            }
+        } else |_| {}
+    }
 }
 
 fn runChecks(ctx: *const process.Ctx, cfg: *const config.Config) ![]Check {

@@ -20,13 +20,58 @@ const Row = struct {
     wt_sessions: usize,
 };
 
-pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []const u8, pr: *ui.Printer) u8 {
+pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []const u8, json_out: bool, pr: *ui.Printer) u8 {
     var arenas = ArrayList(*std.heap.ArenaAllocator).init(ctx.alloc);
     defer for (arenas.items) |a| a.deinit();
     const rows = statusAll(ctx, cfg, names, cfg.parallelism.status, &arenas) catch {
         process.stderrLineNewline(ctx, "fmr status: internal error", .{});
         return 1;
     };
+
+    if (json_out) {
+        var buf = ArrayList(u8).init(ctx.alloc);
+        buf.appendSlice("{\n  \"version\": 1,\n  \"command\": \"status\",\n  \"exit\": 0,\n  \"repos\": [\n") catch return 1;
+        for (names, 0..) |name, i| {
+            const r = &rows[i];
+            const state_str = @tagName(r.state);
+            const snap_str = @tagName(r.snap);
+            const paused = !(cfg.findRepo(name) orelse return 1).sync_enabled;
+            const entry = std.fmt.allocPrint(ctx.alloc,
+                \\    {{
+                \\      "name": "{s}",
+                \\      "branch": "{s}",
+                \\      "head": "{s}",
+                \\      "state": "{s}",
+                \\      "paused": {s},
+                \\      "ahead": {d},
+                \\      "behind": {d},
+                \\      "dirty_tracked": {d},
+                \\      "untracked": {d},
+                \\      "snap": "{s}",
+                \\      "sessions": {d}
+                \\    }}{s}
+                \\
+            , .{
+                name,
+                r.branch,
+                r.head,
+                state_str,
+                if (paused) "true" else "false",
+                r.ahead,
+                r.behind,
+                r.dirty_tracked,
+                r.untracked,
+                snap_str,
+                r.wt_sessions,
+                if (i + 1 < names.len) "," else "",
+            }) catch return 1;
+            buf.appendSlice(entry) catch return 1;
+        }
+        buf.appendSlice("  ]\n}\n") catch return 1;
+        std.Io.File.stdout().writeStreamingAll(ctx.io, buf.items) catch {};
+        return 0;
+    }
+
     var max_name: usize = 4;
     var max_branch: usize = 6;
     var max_head: usize = 4;

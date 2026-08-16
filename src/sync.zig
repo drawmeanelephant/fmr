@@ -19,7 +19,7 @@ pub const Outcome = struct {
 
 const fetch_timeout_ns = 10 * 60 * std.time.ns_per_s;
 
-pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []const u8, jobs: usize, pr: *ui.Printer) u8 {
+pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []const u8, jobs: usize, json_out: bool, pr: *ui.Printer) u8 {
     var arenas = ArrayList(*std.heap.ArenaAllocator).init(ctx.alloc);
     defer for (arenas.items) |a| a.deinit();
     var max_exit: u8 = 0;
@@ -28,6 +28,7 @@ pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []
         process.stderrLineNewline(ctx, "fmr sync: internal error", .{});
         return 1;
     };
+
     for (results) |o| {
         switch (o.result) {
             .ok => counts[0] += 1,
@@ -35,6 +36,54 @@ pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []
             .failed => counts[2] += 1,
             .skipped => counts[3] += 1,
         }
+        if (o.exit > max_exit) max_exit = o.exit;
+    }
+
+    if (json_out) {
+        var buf = ArrayList(u8).init(ctx.alloc);
+        buf.appendSlice("{\n  \"version\": 1,\n  \"command\": \"sync\",\n") catch return 1;
+        const exit_line = std.fmt.allocPrint(ctx.alloc, "  \"exit\": {d},\n  \"repos\": [\n", .{max_exit}) catch return 1;
+        buf.appendSlice(exit_line) catch return 1;
+
+        for (results, 0..) |o, i| {
+            const name = if (i < names.len) names[i] else "";
+            const res_str = @tagName(o.result);
+            const entry = std.fmt.allocPrint(ctx.alloc,
+                \\    {{
+                \\      "name": "{s}",
+                \\      "result": "{s}",
+                \\      "exit": {d},
+                \\      "message": "{s}"
+                \\    }}{s}
+                \\
+            , .{
+                name,
+                res_str,
+                o.exit,
+                o.line,
+                if (i + 1 < results.len) "," else "",
+            }) catch return 1;
+            buf.appendSlice(entry) catch return 1;
+        }
+
+        const summary = std.fmt.allocPrint(ctx.alloc,
+            \\  ],
+            \\  "summary": {{
+            \\    "ok": {d},
+            \\    "refused": {d},
+            \\    "failed": {d},
+            \\    "skipped": {d}
+            \\  }}
+            \\}}
+            \\
+        , .{ counts[0], counts[1], counts[2], counts[3] }) catch return 1;
+        buf.appendSlice(summary) catch return 1;
+
+        std.Io.File.stdout().writeStreamingAll(ctx.io, buf.items) catch {};
+        return max_exit;
+    }
+
+    for (results) |o| {
         const color: ui.Color = switch (o.result) {
             .ok => .green,
             .refused => .yellow,
@@ -43,7 +92,6 @@ pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []
         };
         pr.line(ctx, color, "{s}", .{o.line});
         for (o.details) |d| pr.line(ctx, .gray, "  {s}", .{d});
-        if (o.exit > max_exit) max_exit = o.exit;
     }
     pr.raw(ctx, "Summary: {d} ok, {d} refused, {d} failed, {d} skipped (exit {d})", .{
         counts[0], counts[1], counts[2], counts[3], max_exit,

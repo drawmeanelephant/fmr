@@ -1,7 +1,7 @@
 //! RAG snapshot pipeline for `fmr rag`.
 //! Creates content-addressed, immutable snapshot directories at `paths.sourceRag/<name>/<sha40>/`,
-//! generates `manifest.json`, and atomically swaps the `paths.sourceRag/<name>/current` symlink.
-//! Supports `command` (exporter subprocess) and `files` (zero-subprocess glob walk) modes.
+//! generates `manifest.json`, atomically swaps the `current` symlink, supports retention GC (`--gc <n>`),
+//! and emits structured JSON output (`--json`).
 
 const std = @import("std");
 const ArrayList = std.array_list.Managed;
@@ -10,23 +10,148 @@ const config = @import("config.zig");
 const git = @import("git.zig");
 const ui = @import("ui.zig");
 
+pub const RagResult = struct {
+    name: []const u8,
+    status: []const u8,
+    action: []const u8,
+    sha: []const u8,
+    exit: u8,
+    message: []const u8,
+};
+
 pub fn run(
     ctx: *const process.Ctx,
     cfg: *const config.Config,
     names: []const []const u8,
     force: bool,
+    gc_keep: ?usize,
+    json_out: bool,
     pr: *const ui.Printer,
 ) u8 {
+    if (gc_keep) |keep_n| {
+        var total_pruned: usize = 0;
+        for (names) |name| {
+            const pruned = gcRepo(ctx, cfg, name, keep_n, pr) catch 0;
+            total_pruned += pruned;
+        }
+        if (json_out) {
+            var buf = ArrayList(u8).init(ctx.alloc);
+            const out = std.fmt.allocPrint(ctx.alloc,
+                \\{{
+                \\  "version": 1,
+                \\  "command": "rag-gc",
+                \\  "exit": 0,
+                \\  "pruned": {d},
+                \\  "retaining": {d}
+                \\}}
+                \\
+            , .{ total_pruned, keep_n }) catch return 1;
+            buf.appendSlice(out) catch return 1;
+            std.Io.File.stdout().writeStreamingAll(ctx.io, buf.items) catch {};
+        }
+        return 0;
+    }
+
     var max_exit: u8 = 0;
+    var results = ArrayList(RagResult).init(ctx.alloc);
+
     for (names) |name| {
         const repo = cfg.findRepo(name) orelse {
             process.stderrLineNewline(ctx, "fmr: unknown repo '{s}'", .{name});
             return 2;
         };
-        const code = snapOne(ctx, cfg, repo, force, pr);
-        if (code > max_exit) max_exit = code;
+        const res = snapOne(ctx, cfg, repo, force, json_out, pr);
+        results.append(res) catch return 1;
+        if (res.exit > max_exit) max_exit = res.exit;
     }
+
+    if (json_out) {
+        var buf = ArrayList(u8).init(ctx.alloc);
+        buf.appendSlice("{\n  \"version\": 1,\n  \"command\": \"rag\",\n") catch return 1;
+        const exit_line = std.fmt.allocPrint(ctx.alloc, "  \"exit\": {d},\n  \"repos\": [\n", .{max_exit}) catch return 1;
+        buf.appendSlice(exit_line) catch return 1;
+
+        for (results.items, 0..) |r, i| {
+            const entry = std.fmt.allocPrint(ctx.alloc,
+                \\    {{
+                \\      "name": "{s}",
+                \\      "status": "{s}",
+                \\      "action": "{s}",
+                \\      "sha": "{s}",
+                \\      "exit": {d},
+                \\      "message": "{s}"
+                \\    }}{s}
+                \\
+            , .{
+                r.name,
+                r.status,
+                r.action,
+                r.sha,
+                r.exit,
+                r.message,
+                if (i + 1 < results.items.len) "," else "",
+            }) catch return 1;
+            buf.appendSlice(entry) catch return 1;
+        }
+
+        buf.appendSlice("  ]\n}\n") catch return 1;
+        std.Io.File.stdout().writeStreamingAll(ctx.io, buf.items) catch {};
+    }
+
     return max_exit;
+}
+
+pub fn gcRepo(ctx: *const process.Ctx, cfg: *const config.Config, repo_name: []const u8, keep_n: usize, pr: *const ui.Printer) !usize {
+    const alloc = ctx.alloc;
+    const repo_rag_dir = try std.Io.Dir.path.join(alloc, &.{ cfg.paths.source_rag, repo_name });
+    var dir = std.Io.Dir.cwd().openDir(ctx.io, repo_rag_dir, .{ .iterate = true }) catch return 0;
+    defer dir.close(ctx.io);
+
+    // Read current symlink target if present
+    const current_path = try std.Io.Dir.path.join(alloc, &.{ repo_rag_dir, "current" });
+    var cur_buf: [1024]u8 = undefined;
+    const n = std.Io.Dir.cwd().readLink(ctx.io, current_path, &cur_buf) catch 0;
+    const current_target = if (n > 0) cur_buf[0..n] else "";
+
+    const SnapInfo = struct {
+        name: []const u8,
+        mtime: i96,
+    };
+    var snaps = ArrayList(SnapInfo).init(alloc);
+
+    var it = dir.iterate();
+    while (it.next(ctx.io) catch null) |entry| {
+        if (entry.kind != .directory) continue;
+        if (std.mem.startsWith(u8, entry.name, ".")) continue;
+        if (std.mem.eql(u8, entry.name, "current")) continue;
+        const snap_path = try std.Io.Dir.path.join(alloc, &.{ repo_rag_dir, entry.name });
+        const st = std.Io.Dir.cwd().statFile(ctx.io, snap_path, .{}) catch continue;
+        try snaps.append(.{ .name = entry.name, .mtime = st.mtime.nanoseconds });
+    }
+
+    // Sort newest to oldest (descending mtime)
+    std.mem.sort(SnapInfo, snaps.items, {}, struct {
+        fn less(_: void, a: SnapInfo, b: SnapInfo) bool {
+            return a.mtime > b.mtime;
+        }
+    }.less);
+
+    var pruned: usize = 0;
+    for (snaps.items, 0..) |s, idx| {
+        if (idx < keep_n) continue; // Keep top N
+        if (std.mem.eql(u8, s.name, current_target)) continue; // Always keep current symlink target
+
+        const snap_to_del = try std.Io.Dir.path.join(alloc, &.{ repo_rag_dir, s.name });
+        std.Io.Dir.cwd().deleteTree(ctx.io, snap_to_del) catch continue;
+        pruned += 1;
+    }
+
+    if (pruned > 0) {
+        pr.line(ctx, .green, "[gc] {s}: pruned {d} old snapshot(s) (retaining {d})", .{ repo_name, pruned, keep_n });
+    } else {
+        pr.line(ctx, .gray, "[gc] {s}: 0 snapshots pruned (total {d} <= {d})", .{ repo_name, snaps.items.len, keep_n });
+    }
+    return pruned;
 }
 
 fn snapOne(
@@ -34,79 +159,248 @@ fn snapOne(
     cfg: *const config.Config,
     repo: *const config.Repo,
     force: bool,
+    json_out: bool,
     pr: *const ui.Printer,
-) u8 {
+) RagResult {
     const alloc = ctx.alloc;
-    const primary = std.Io.Dir.path.join(alloc, &.{ cfg.paths.repos, repo.name }) catch return 1;
+    const primary = std.Io.Dir.path.join(alloc, &.{ cfg.paths.repos, repo.name }) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = "",
+        .exit = 1,
+        .message = "out of memory",
+    };
 
     // 1. Git existence and sanity checks
     if (!git.dirExists(ctx, primary)) {
-        pr.line(ctx, .red, "[refuse] {s}: repository directory missing (run 'fmr sync {s}' first)", .{ repo.name, repo.name });
-        return 3;
+        if (!json_out) pr.line(ctx, .red, "[refuse] {s}: repository directory missing (run 'fmr sync {s}' first)", .{ repo.name, repo.name });
+        return .{
+            .name = repo.name,
+            .status = "refused",
+            .action = "missing",
+            .sha = "",
+            .exit = 3,
+            .message = "repository directory missing",
+        };
     }
 
-    const gk = git.gitDirKind(ctx, primary) catch return 1;
+    const gk = git.gitDirKind(ctx, primary) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = "",
+        .exit = 1,
+        .message = "git inspection failed",
+    };
     if (gk == .absent) {
-        pr.line(ctx, .red, "[refuse] {s}: not a git repository", .{repo.name});
-        return 3;
+        if (!json_out) pr.line(ctx, .red, "[refuse] {s}: not a git repository", .{repo.name});
+        return .{
+            .name = repo.name,
+            .status = "refused",
+            .action = "not_repo",
+            .sha = "",
+            .exit = 3,
+            .message = "not a git repository",
+        };
     }
     if (gk == .file) {
-        pr.line(ctx, .red, "[refuse] {s}: primary is a worktree (refusing)", .{repo.name});
-        return 3;
+        if (!json_out) pr.line(ctx, .red, "[refuse] {s}: primary is a worktree (refusing)", .{repo.name});
+        return .{
+            .name = repo.name,
+            .status = "refused",
+            .action = "worktree",
+            .sha = "",
+            .exit = 3,
+            .message = "primary is a worktree",
+        };
     }
 
-    const commits = git.hasCommits(ctx, primary) catch return 1;
+    const commits = git.hasCommits(ctx, primary) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = "",
+        .exit = 1,
+        .message = "git verification failed",
+    };
     if (!commits) {
-        pr.line(ctx, .red, "[refuse] {s}: repository is unborn (no commits)", .{repo.name});
-        return 3;
+        if (!json_out) pr.line(ctx, .red, "[refuse] {s}: repository is unborn (no commits)", .{repo.name});
+        return .{
+            .name = repo.name,
+            .status = "refused",
+            .action = "unborn",
+            .sha = "",
+            .exit = 3,
+            .message = "repository is unborn",
+        };
     }
 
     // 2. Check dirty state (tracked changes require --force for snapshot reproducibility)
-    const p = (git.porcelain(ctx, primary) catch return 1) orelse git.Porcelain{
+    const p = (git.porcelain(ctx, primary) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = "",
+        .exit = 1,
+        .message = "git status failed",
+    }) orelse git.Porcelain{
         .tracked_changes = 0,
         .untracked = 0,
         .lines = &.{},
     };
     if (p.tracked_changes > 0 and !force) {
-        pr.line(ctx, .red, "[refuse] {s}: dirty ({d} tracked modifications) — unreproducible snapshot without --force", .{ repo.name, p.tracked_changes });
-        return 3;
+        if (!json_out) pr.line(ctx, .red, "[refuse] {s}: dirty ({d} tracked modifications) — unreproducible snapshot without --force", .{ repo.name, p.tracked_changes });
+        return .{
+            .name = repo.name,
+            .status = "refused",
+            .action = "dirty",
+            .sha = "",
+            .exit = 3,
+            .message = "dirty working tree without --force",
+        };
     }
 
     // 3. Skip if no rag configured
     const rag_cfg = repo.rag orelse {
-        pr.line(ctx, .gray, "[skip] {s}: no rag configured", .{repo.name});
-        return 0;
+        if (!json_out) pr.line(ctx, .gray, "[skip] {s}: no rag configured", .{repo.name});
+        return .{
+            .name = repo.name,
+            .status = "skipped",
+            .action = "skip",
+            .sha = "",
+            .exit = 0,
+            .message = "no rag configured",
+        };
     };
 
     // 4. Retrieve commit SHA and branch name
-    const full_sha = (git.fullSha(ctx, primary) catch return 1) orelse return 1;
-    const short_sha = (git.shortSha(ctx, primary) catch return 1) orelse full_sha[0..@min(7, full_sha.len)];
-    const branch = (git.headBranch(ctx, primary) catch return 1) orelse "detached";
+    const full_sha = (git.fullSha(ctx, primary) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = "",
+        .exit = 1,
+        .message = "git full SHA failed",
+    }) orelse return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = "",
+        .exit = 1,
+        .message = "git full SHA missing",
+    };
+    const short_sha = (git.shortSha(ctx, primary) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = "",
+        .exit = 1,
+        .message = "git short SHA failed",
+    }) orelse full_sha[0..@min(7, full_sha.len)];
+    const branch = (git.headBranch(ctx, primary) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = "",
+        .exit = 1,
+        .message = "git branch failed",
+    }) orelse "detached";
 
     // 5. Check if snapshot already exists (idempotency check)
-    const repo_rag_dir = std.Io.Dir.path.join(alloc, &.{ cfg.paths.source_rag, repo.name }) catch return 1;
-    const target_snap_dir = std.Io.Dir.path.join(alloc, &.{ repo_rag_dir, full_sha }) catch return 1;
-    const manifest_path = std.Io.Dir.path.join(alloc, &.{ target_snap_dir, "manifest.json" }) catch return 1;
+    const repo_rag_dir = std.Io.Dir.path.join(alloc, &.{ cfg.paths.source_rag, repo.name }) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = short_sha,
+        .exit = 1,
+        .message = "path join failed",
+    };
+    const target_snap_dir = std.Io.Dir.path.join(alloc, &.{ repo_rag_dir, full_sha }) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = short_sha,
+        .exit = 1,
+        .message = "path join failed",
+    };
+    const manifest_path = std.Io.Dir.path.join(alloc, &.{ target_snap_dir, "manifest.json" }) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = short_sha,
+        .exit = 1,
+        .message = "path join failed",
+    };
 
     if (!force and git.dirExists(ctx, target_snap_dir) and git.dirExists(ctx, manifest_path)) {
-        pr.line(ctx, .green, "[ok] {s}: rag up to date ({s})", .{ repo.name, short_sha });
-        return 0;
+        if (!json_out) pr.line(ctx, .green, "[ok] {s}: rag up to date ({s})", .{ repo.name, short_sha });
+        return .{
+            .name = repo.name,
+            .status = "ok",
+            .action = "up to date",
+            .sha = short_sha,
+            .exit = 0,
+            .message = "snapshot already exists",
+        };
     }
 
     // 6. Ensure source-rag root and repo-rag root exist
-    std.Io.Dir.cwd().createDirPath(ctx.io, repo_rag_dir) catch return 1;
+    std.Io.Dir.cwd().createDirPath(ctx.io, repo_rag_dir) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = short_sha,
+        .exit = 1,
+        .message = "createDirPath failed",
+    };
 
     // 7. Create staging directory (.staging/<name>-<sha>-<pid>)
-    const staging_root = std.Io.Dir.path.join(alloc, &.{ repo_rag_dir, ".staging" }) catch return 1;
-    std.Io.Dir.cwd().createDirPath(ctx.io, staging_root) catch return 1;
+    const staging_root = std.Io.Dir.path.join(alloc, &.{ repo_rag_dir, ".staging" }) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = short_sha,
+        .exit = 1,
+        .message = "staging root path join failed",
+    };
+    std.Io.Dir.cwd().createDirPath(ctx.io, staging_root) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = short_sha,
+        .exit = 1,
+        .message = "createDirPath staging failed",
+    };
 
     const pid = std.c.getpid();
-    const staging_dir_name = std.fmt.allocPrint(alloc, "{s}-{s}-{d}", .{ repo.name, short_sha, pid }) catch return 1;
-    const staging_dir = std.Io.Dir.path.join(alloc, &.{ staging_root, staging_dir_name }) catch return 1;
+    const staging_dir_name = std.fmt.allocPrint(alloc, "{s}-{s}-{d}", .{ repo.name, short_sha, pid }) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = short_sha,
+        .exit = 1,
+        .message = "staging dir allocPrint failed",
+    };
+    const staging_dir = std.Io.Dir.path.join(alloc, &.{ staging_root, staging_dir_name }) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = short_sha,
+        .exit = 1,
+        .message = "staging dir join failed",
+    };
 
     // Ensure fresh empty staging dir
     std.Io.Dir.cwd().deleteTree(ctx.io, staging_dir) catch {};
-    std.Io.Dir.cwd().createDirPath(ctx.io, staging_dir) catch return 1;
+    std.Io.Dir.cwd().createDirPath(ctx.io, staging_dir) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = short_sha,
+        .exit = 1,
+        .message = "createDirPath staging dir failed",
+    };
 
     var recorded_command: ?[]const []const u8 = null;
     const mode_str: []const u8 = switch (rag_cfg) {
@@ -118,54 +412,97 @@ fn snapOne(
         .command => |cmd_cfg| {
             const expanded = expandRagArgv(ctx, cmd_cfg.argv, cfg, primary, repo.name, branch, staging_dir) orelse {
                 std.Io.Dir.cwd().deleteTree(ctx.io, staging_dir) catch {};
-                return 1;
+                return .{
+                    .name = repo.name,
+                    .status = "error",
+                    .action = "none",
+                    .sha = short_sha,
+                    .exit = 1,
+                    .message = "placeholder expansion failed",
+                };
             };
             recorded_command = expanded;
 
             // Build environment variables
             var env_list = ArrayList([]const u8).init(alloc);
-            env_list.append(std.fmt.allocPrint(alloc, "FMR_REPO={s}", .{primary}) catch return 1) catch return 1;
-            env_list.append(std.fmt.allocPrint(alloc, "FMR_NAME={s}", .{repo.name}) catch return 1) catch return 1;
-            env_list.append(std.fmt.allocPrint(alloc, "FMR_BRANCH={s}", .{branch}) catch return 1) catch return 1;
-            env_list.append(std.fmt.allocPrint(alloc, "FMR_RAG_OUT={s}", .{staging_dir}) catch return 1) catch return 1;
-            env_list.append(std.fmt.allocPrint(alloc, "YARD_REPO={s}", .{primary}) catch return 1) catch return 1;
-            env_list.append(std.fmt.allocPrint(alloc, "YARD_NAME={s}", .{repo.name}) catch return 1) catch return 1;
-            env_list.append(std.fmt.allocPrint(alloc, "YARD_BRANCH={s}", .{branch}) catch return 1) catch return 1;
-            env_list.append(std.fmt.allocPrint(alloc, "YARD_RAG_OUT={s}", .{staging_dir}) catch return 1) catch return 1;
-            for (repo.env) |kv| env_list.append(kv) catch return 1;
+            env_list.append(std.fmt.allocPrint(alloc, "FMR_REPO={s}", .{primary}) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" }) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" };
+            env_list.append(std.fmt.allocPrint(alloc, "FMR_NAME={s}", .{repo.name}) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" }) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" };
+            env_list.append(std.fmt.allocPrint(alloc, "FMR_BRANCH={s}", .{branch}) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" }) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" };
+            env_list.append(std.fmt.allocPrint(alloc, "FMR_RAG_OUT={s}", .{staging_dir}) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" }) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" };
+            env_list.append(std.fmt.allocPrint(alloc, "YARD_REPO={s}", .{primary}) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" }) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" };
+            env_list.append(std.fmt.allocPrint(alloc, "YARD_NAME={s}", .{repo.name}) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" }) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" };
+            env_list.append(std.fmt.allocPrint(alloc, "YARD_BRANCH={s}", .{branch}) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" }) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" };
+            env_list.append(std.fmt.allocPrint(alloc, "YARD_RAG_OUT={s}", .{staging_dir}) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" }) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" };
+            for (repo.env) |kv| env_list.append(kv) catch return .{ .name = repo.name, .status = "error", .action = "none", .sha = short_sha, .exit = 1, .message = "env allocPrint failed" };
 
             const res = process.run(ctx, expanded, .{
                 .cwd = primary,
                 .env = env_list.items,
             }) catch {
                 std.Io.Dir.cwd().deleteTree(ctx.io, staging_dir) catch {};
-                pr.line(ctx, .red, "[fail] {s}: failed to spawn exporter {s}", .{ repo.name, expanded[0] });
-                return 4;
+                if (!json_out) pr.line(ctx, .red, "[fail] {s}: failed to spawn exporter {s}", .{ repo.name, expanded[0] });
+                return .{
+                    .name = repo.name,
+                    .status = "failed",
+                    .action = "spawn_error",
+                    .sha = short_sha,
+                    .exit = 4,
+                    .message = "failed to spawn exporter",
+                };
             };
 
             if (!res.ok()) {
                 std.Io.Dir.cwd().deleteTree(ctx.io, staging_dir) catch {};
                 const code = res.exited() orelse 1;
-                pr.line(ctx, .red, "[fail] {s}: {s} exited with code {d}", .{ repo.name, expanded[0], code });
-                return 4;
+                if (!json_out) pr.line(ctx, .red, "[fail] {s}: {s} exited with code {d}", .{ repo.name, expanded[0], code });
+                const msg = std.fmt.allocPrint(alloc, "{s} exited with code {d}", .{ expanded[0], code }) catch "failed";
+                return .{
+                    .name = repo.name,
+                    .status = "failed",
+                    .action = "failed",
+                    .sha = short_sha,
+                    .exit = 4,
+                    .message = msg,
+                };
             }
 
             // If an explicit output directory was specified and is not the staging dir, copy it in
             if (cmd_cfg.output) |out_spec| {
                 const expanded_out = expandRagString(ctx, out_spec, cfg, primary, repo.name, branch, staging_dir) orelse {
                     std.Io.Dir.cwd().deleteTree(ctx.io, staging_dir) catch {};
-                    return 1;
+                    return .{
+                        .name = repo.name,
+                        .status = "error",
+                        .action = "none",
+                        .sha = short_sha,
+                        .exit = 1,
+                        .message = "output expansion failed",
+                    };
                 };
                 if (!std.mem.eql(u8, expanded_out, staging_dir)) {
                     const src_out = if (std.Io.Dir.path.isAbsolute(expanded_out))
                         expanded_out
                     else
-                        std.Io.Dir.path.join(alloc, &.{ primary, expanded_out }) catch return 1;
+                        std.Io.Dir.path.join(alloc, &.{ primary, expanded_out }) catch return .{
+                            .name = repo.name,
+                            .status = "error",
+                            .action = "none",
+                            .sha = short_sha,
+                            .exit = 1,
+                            .message = "output path join failed",
+                        };
 
                     copyTree(ctx, src_out, staging_dir) catch {
                         std.Io.Dir.cwd().deleteTree(ctx.io, staging_dir) catch {};
-                        pr.line(ctx, .red, "[fail] {s}: failed to copy rag output from {s}", .{ repo.name, src_out });
-                        return 4;
+                        if (!json_out) pr.line(ctx, .red, "[fail] {s}: failed to copy rag output from {s}", .{ repo.name, src_out });
+                        return .{
+                            .name = repo.name,
+                            .status = "failed",
+                            .action = "copy_error",
+                            .sha = short_sha,
+                            .exit = 4,
+                            .message = "failed to copy rag output",
+                        };
                     };
                 }
             }
@@ -175,8 +512,15 @@ fn snapOne(
             var count: usize = 0;
             copyFilesWalk(ctx, primary, staging_dir, primary, files_cfg.globs, max_depth, 0, &count) catch {
                 std.Io.Dir.cwd().deleteTree(ctx.io, staging_dir) catch {};
-                pr.line(ctx, .red, "[fail] {s}: failed during files mode copy", .{repo.name});
-                return 4;
+                if (!json_out) pr.line(ctx, .red, "[fail] {s}: failed during files mode copy", .{repo.name});
+                return .{
+                    .name = repo.name,
+                    .status = "failed",
+                    .action = "copy_error",
+                    .sha = short_sha,
+                    .exit = 4,
+                    .message = "failed during files mode copy",
+                };
             };
         },
     }
@@ -197,25 +541,67 @@ fn snapOne(
         recorded_command,
     ) catch {
         std.Io.Dir.cwd().deleteTree(ctx.io, staging_dir) catch {};
-        return 1;
+        return .{
+            .name = repo.name,
+            .status = "error",
+            .action = "none",
+            .sha = short_sha,
+            .exit = 1,
+            .message = "createManifestJson failed",
+        };
     };
-    const staging_manifest_path = std.Io.Dir.path.join(alloc, &.{ staging_dir, "manifest.json" }) catch return 1;
+    const staging_manifest_path = std.Io.Dir.path.join(alloc, &.{ staging_dir, "manifest.json" }) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = short_sha,
+        .exit = 1,
+        .message = "manifest path join failed",
+    };
     var mf = std.Io.Dir.cwd().createFile(ctx.io, staging_manifest_path, .{ .truncate = true }) catch {
         std.Io.Dir.cwd().deleteTree(ctx.io, staging_dir) catch {};
-        return 1;
+        return .{
+            .name = repo.name,
+            .status = "error",
+            .action = "none",
+            .sha = short_sha,
+            .exit = 1,
+            .message = "createFile manifest.json failed",
+        };
     };
     mf.writeStreamingAll(ctx.io, manifest_content) catch {
         mf.close(ctx.io);
         std.Io.Dir.cwd().deleteTree(ctx.io, staging_dir) catch {};
-        return 1;
+        return .{
+            .name = repo.name,
+            .status = "error",
+            .action = "none",
+            .sha = short_sha,
+            .exit = 1,
+            .message = "write manifest.json failed",
+        };
     };
     mf.close(ctx.io);
 
     // 10. Atomic promotion: staging -> <source_rag>/<name>/<full_sha>/
     if (git.dirExists(ctx, target_snap_dir)) {
         // If force replacing existing snapshot
-        const trash_name = std.fmt.allocPrint(alloc, ".trash-{s}-{d}", .{ short_sha, pid }) catch return 1;
-        const trash_path = std.Io.Dir.path.join(alloc, &.{ staging_root, trash_name }) catch return 1;
+        const trash_name = std.fmt.allocPrint(alloc, ".trash-{s}-{d}", .{ short_sha, pid }) catch return .{
+            .name = repo.name,
+            .status = "error",
+            .action = "none",
+            .sha = short_sha,
+            .exit = 1,
+            .message = "trash name allocPrint failed",
+        };
+        const trash_path = std.Io.Dir.path.join(alloc, &.{ staging_root, trash_name }) catch return .{
+            .name = repo.name,
+            .status = "error",
+            .action = "none",
+            .sha = short_sha,
+            .exit = 1,
+            .message = "trash path join failed",
+        };
         std.Io.Dir.renameAbsolute(target_snap_dir, trash_path, ctx.io) catch {
             std.Io.Dir.cwd().deleteTree(ctx.io, target_snap_dir) catch {};
         };
@@ -224,29 +610,78 @@ fn snapOne(
 
     std.Io.Dir.renameAbsolute(staging_dir, target_snap_dir, ctx.io) catch {
         std.Io.Dir.cwd().deleteTree(ctx.io, staging_dir) catch {};
-        pr.line(ctx, .red, "[fail] {s}: failed to promote snapshot directory", .{repo.name});
-        return 1;
+        if (!json_out) pr.line(ctx, .red, "[fail] {s}: failed to promote snapshot directory", .{repo.name});
+        return .{
+            .name = repo.name,
+            .status = "error",
+            .action = "promote_error",
+            .sha = short_sha,
+            .exit = 1,
+            .message = "failed to promote snapshot directory",
+        };
     };
 
     // 11. Atomic symlink update: current -> <full_sha>
-    const current_path = std.Io.Dir.path.join(alloc, &.{ repo_rag_dir, "current" }) catch return 1;
-    const current_tmp_name = std.fmt.allocPrint(alloc, "current.tmp.{d}", .{pid}) catch return 1;
-    const current_tmp_path = std.Io.Dir.path.join(alloc, &.{ repo_rag_dir, current_tmp_name }) catch return 1;
+    const current_path = std.Io.Dir.path.join(alloc, &.{ repo_rag_dir, "current" }) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = short_sha,
+        .exit = 1,
+        .message = "current path join failed",
+    };
+    const current_tmp_name = std.fmt.allocPrint(alloc, "current.tmp.{d}", .{pid}) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = short_sha,
+        .exit = 1,
+        .message = "current tmp name allocPrint failed",
+    };
+    const current_tmp_path = std.Io.Dir.path.join(alloc, &.{ repo_rag_dir, current_tmp_name }) catch return .{
+        .name = repo.name,
+        .status = "error",
+        .action = "none",
+        .sha = short_sha,
+        .exit = 1,
+        .message = "current tmp path join failed",
+    };
 
     // Delete any stale tmp symlink
     std.Io.Dir.cwd().deleteFile(ctx.io, current_tmp_path) catch {};
 
     std.Io.Dir.cwd().symLink(ctx.io, full_sha, current_tmp_path, .{}) catch {
-        pr.line(ctx, .red, "[fail] {s}: failed to create snapshot symlink", .{repo.name});
-        return 1;
+        if (!json_out) pr.line(ctx, .red, "[fail] {s}: failed to create snapshot symlink", .{repo.name});
+        return .{
+            .name = repo.name,
+            .status = "error",
+            .action = "symlink_error",
+            .sha = short_sha,
+            .exit = 1,
+            .message = "failed to create snapshot symlink",
+        };
     };
     std.Io.Dir.renameAbsolute(current_tmp_path, current_path, ctx.io) catch {
-        pr.line(ctx, .red, "[fail] {s}: failed to swap snapshot symlink", .{repo.name});
-        return 1;
+        if (!json_out) pr.line(ctx, .red, "[fail] {s}: failed to swap snapshot symlink", .{repo.name});
+        return .{
+            .name = repo.name,
+            .status = "error",
+            .action = "swap_error",
+            .sha = short_sha,
+            .exit = 1,
+            .message = "failed to swap snapshot symlink",
+        };
     };
 
-    pr.line(ctx, .green, "[ok] {s}: rag snap {s} ({d} files)", .{ repo.name, short_sha, files_exported });
-    return 0;
+    if (!json_out) pr.line(ctx, .green, "[ok] {s}: rag snap {s} ({d} files)", .{ repo.name, short_sha, files_exported });
+    return .{
+        .name = repo.name,
+        .status = "ok",
+        .action = "snap",
+        .sha = short_sha,
+        .exit = 0,
+        .message = "snapshot created",
+    };
 }
 
 // ---------------------------------------------------------------------------

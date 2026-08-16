@@ -1,0 +1,179 @@
+{
+  "_version": 1,
+  "_note": "Production workspace catalog for fmr / Conductor",
+  "paths": {
+    "repos": "~/dev/drawmeanelephant",
+    "worktrees": "~/Code/worktrees",
+    "sourceRag": "~/Code/source-rag"
+  },
+  "parallelism": {
+    "sync": 4,
+    "status": 4,
+    "check": 1,
+    "rag": 1
+  },
+  "defaults": {
+    "zig": {
+      "check": {
+        "argv": ["zig", "build", "test"]
+      }
+    },
+    "go": {
+      "check": {
+        "argv": ["go", "test", "./..."]
+      }
+    },
+    "node": {
+      "check": {
+        "argv": ["npm", "test"]
+      }
+    }
+  },
+  "repos": [
+    {
+      "name": "boris",
+      "url": "git@github.com:drawmeanelephant/boris.git",
+      "kind": "zig",
+      "default_branch": "afterparty",
+      "worktree_safe": true,
+      "rag": {
+        "command": {
+          "argv": ["python3", "{workspace}/scripts/export_boris_rag.py", "{rag_out}"],
+          "output": "{rag_out}"
+        }
+      },
+      "commands": {
+        "serve": {
+          "argv": ["zig", "build", "run", "--", "serve"]
+        },
+        "site": {
+          "argv": ["zig", "build"]
+        }
+      }
+    },
+    {
+      "name": "DipshitOS",
+      "url": "git@github.com:drawmeanelephant/DipshitOS.git",
+      "kind": "zig",
+      "worktree_safe": false
+    },
+    {
+      "name": "oliver",
+      "url": "git@github.com:drawmeanelephant/oliver.git",
+      "kind": "zig",
+      "worktree_safe": false,
+      "rag": {
+        "files": {
+          "globs": ["*.md", "*.toml", "*.json"],
+          "max_depth": 2
+        }
+      }
+    },
+    {
+      "name": "know",
+      "url": "git@github.com:MrEmanuel/know.git",
+      "kind": "go",
+      "rag": {
+        "command": {
+          "argv": ["go", "run", "./cmd/{name}", "rag"],
+          "output": "rag-archive"
+        }
+      }
+    },
+    {
+      "name": "codex-limits",
+      "url": "https://github.com/thrr87/codex-limits.git",
+      "kind": "go"
+    },
+    {
+      "name": "fullonrogues.org",
+      "url": "git@github.com:drawmeanelephant/fullonrogues.org.git",
+      "kind": "site",
+      "rag": {
+        "command": {
+          "argv": ["python3", "{workspace}/scripts/export_boris_site_rag.py", "{name}"],
+          "output": "out/rag"
+        }
+      }
+    },
+    {
+      "name": "rotkeeper",
+      "url": "git@github.com:drawmeanelephant/rotkeeper.git",
+      "kind": "bash",
+      "rag": {
+        "command": {
+          "argv": ["{repo}/rotkeeper.sh", "book", "--all"],
+          "output": "bones/book-reports"
+        }
+      },
+      "commands": {
+        "init": {
+          "argv": ["{repo}/rotkeeper.sh", "init"]
+        }
+      }
+    },
+    {
+      "name": "minutes-without-motion",
+      "url": "git@github.com:drawmeanelephant/minutes-without-motion.git",
+      "kind": "bash",
+      "rag": {
+        "command": {
+          "argv": ["bash", "scripts/rag.sh"],
+          "output": "rags"
+        }
+      }
+    },
+    {
+      "name": "la-famille",
+      "url": "git@github.com:drawmeanelephant/la-famille.git",
+      "kind": "other",
+      "rag": {
+        "command": {
+          "argv": ["python3", "{workspace}/scripts/export_la_famille_rag.py", "{rag_out}"]
+        }
+      }
+    },
+    {
+      "name": "filed.fyi",
+      "url": "git@github.com:drawmeanelephant/filed.fyi.git",
+      "kind": "other",
+      "rag": {
+        "command": {
+          "argv": ["python3", "{workspace}/scripts/export_filed_fyi_rag.py", "{rag_out}"]
+        }
+      }
+    },
+    {
+      "name": "apex",
+      "url": "git@github.com:ApexMarkdown/apex.git",
+      "kind": "other",
+      "rag": {
+        "command": {
+          "argv": ["python3", "{workspace}/scripts/export_apex_rag.py", "{rag_out}"]
+        }
+      }
+    },
+    {
+      "name": "thermalextractiondevices.com",
+      "url": "git@github.com:drawmeanelephant/thermalextractiondevices.com.git",
+      "kind": "site",
+      "rag": {
+        "command": {
+          "argv": ["python3", "{workspace}/scripts/export_boris_site_rag.py", "{name}"],
+          "output": "out/rag"
+        }
+      }
+    },
+    {
+      "name": "corgifever.com",
+      "url": "git@github.com:drawmeanelephant/corgifever.com.git",
+      "kind": "site",
+      "rag": {
+        "command": {
+          "argv": ["python3", "{workspace}/scripts/export_boris_site_rag.py", "{name}"],
+          "output": "out/rag"
+        }
+      }
+    }
+  ]
+}
