@@ -15,6 +15,10 @@ pub const Outcome = struct {
     line: []const u8,
     details: []const []const u8,
     exit: u8,
+    /// Machine-readable transition info for --json output.
+    action: []const u8 = "",
+    before: ?[]const u8 = null,
+    after: ?[]const u8 = null,
 };
 
 const fetch_timeout_ns = 10 * 60 * std.time.ns_per_s;
@@ -52,6 +56,9 @@ pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []
                 \\    {{
                 \\      "name": "{s}",
                 \\      "result": "{s}",
+                \\      "action": "{s}",
+                \\      "before": "{s}",
+                \\      "after": "{s}",
                 \\      "exit": {d},
                 \\      "message": "{s}"
                 \\    }}{s}
@@ -59,6 +66,9 @@ pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []
             , .{
                 name,
                 res_str,
+                o.action,
+                o.before orelse "",
+                o.after orelse "",
                 o.exit,
                 o.line,
                 if (i + 1 < results.len) "," else "",
@@ -167,10 +177,10 @@ fn syncAll(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []
 fn syncOne(ctx: *const process.Ctx, cfg: *const config.Config, repo: *const config.Repo, alloc: std.mem.Allocator) !Outcome {
     const primary = try std.Io.Dir.path.join(alloc, &.{ cfg.paths.repos, repo.name });
     if (!repo.sync_enabled) {
-        return Outcome{ .result = .skipped, .line = try std.fmt.allocPrint(alloc, "[skip] {s} - paused (sync disabled)", .{repo.name}), .details = &.{}, .exit = 0 };
+        return Outcome{ .result = .skipped, .line = try std.fmt.allocPrint(alloc, "[skip] {s} - paused (sync disabled)", .{repo.name}), .details = &.{}, .exit = 0, .action = "skip" };
     }
     if (repo.url == null) {
-        return Outcome{ .result = .skipped, .line = try std.fmt.allocPrint(alloc, "[skip] {s} - no url (local-only)", .{repo.name}), .details = &.{}, .exit = 0 };
+        return Outcome{ .result = .skipped, .line = try std.fmt.allocPrint(alloc, "[skip] {s} - no url (local-only)", .{repo.name}), .details = &.{}, .exit = 0, .action = "skip" };
     }
 
     const lock = Lock.acquire(ctx, repo.name) catch {
@@ -184,6 +194,7 @@ fn syncOne(ctx: *const process.Ctx, cfg: *const config.Config, repo: *const conf
             .line = try std.fmt.allocPrint(alloc, "[refuse] {s} - another fmr sync holds this repo (pid {d})", .{ repo.name, owner }),
             .details = det.items,
             .exit = 3,
+            .action = "lock-held",
         };
     }
     defer lockRelease(ctx, repo.name);
@@ -201,6 +212,8 @@ fn syncOne(ctx: *const process.Ctx, cfg: *const config.Config, repo: *const conf
             .line = try std.fmt.allocPrint(alloc, "[ok] {s} - cloned (fresh, HEAD {s})", .{ repo.name, short }),
             .details = &.{},
             .exit = 0,
+            .action = "clone",
+            .after = short,
         };
     }
 
@@ -239,11 +252,17 @@ fn syncOne(ctx: *const process.Ctx, cfg: *const config.Config, repo: *const conf
     const decision = state.decide(facts);
     return switch (decision) {
         .clone => unreachable,
-        .noop => Outcome{
-            .result = .ok,
-            .line = try std.fmt.allocPrint(alloc, "[ok] {s} {s} - up to date", .{ repo.name, branch }),
-            .details = &.{},
-            .exit = 0,
+        .noop => blk: {
+            const head = (try git.shortSha(ctx, primary)) orelse "?";
+            break :blk Outcome{
+                .result = .ok,
+                .line = try std.fmt.allocPrint(alloc, "[ok] {s} {s} - up to date", .{ repo.name, branch }),
+                .details = &.{},
+                .exit = 0,
+                .action = "noop",
+                .before = head,
+                .after = head,
+            };
         },
         .ff_only => blk: {
             const before = (try git.shortSha(ctx, primary)) orelse "?";
@@ -257,6 +276,9 @@ fn syncOne(ctx: *const process.Ctx, cfg: *const config.Config, repo: *const conf
                 .line = try std.fmt.allocPrint(alloc, "[ok] {s} {s} - {s} → {s} (fast-forward)", .{ repo.name, branch, before, after }),
                 .details = &.{},
                 .exit = 0,
+                .action = "fast-forward",
+                .before = before,
+                .after = after,
             };
         },
         .refuse => |r| refuseOutcome(ctx, alloc, repo.name, r, primary, branch, facts),
@@ -278,6 +300,7 @@ fn failOutcome(ctx: *const process.Ctx, alloc: std.mem.Allocator, name: []const 
         .line = std.fmt.allocPrint(alloc, "[fail] {s} - {s} {s}", .{ name, cmd, desc }) catch "fail",
         .details = details.items,
         .exit = 4,
+        .action = "fail",
     };
 }
 
@@ -363,7 +386,7 @@ fn refuseOutcome(
             detail(&details, alloc, "inspect: git -C {s} branch -r", .{primary});
         },
     }
-    return .{ .result = .refused, .line = line, .details = details.items, .exit = 3 };
+    return .{ .result = .refused, .line = line, .details = details.items, .exit = 3, .action = @tagName(refusal) };
 }
 
 fn reasonText(r: state.Refusal) []const u8 {

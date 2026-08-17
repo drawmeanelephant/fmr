@@ -743,11 +743,18 @@ fn mainImpl(init: std.process.Init) !u8 {
         expectExit(&ctx, res_status, 0, "status --json exits 0");
         expect(&ctx, std.mem.indexOf(u8, res_status.stdout, "\"command\": \"status\"") != null, "status JSON has command status");
         expect(&ctx, std.mem.indexOf(u8, res_status.stdout, "\"name\": \"rag-cmd\"") != null, "status JSON names repo");
+        expect(&ctx, std.mem.indexOf(u8, res_status.stdout, "\"kind\": \"other\"") != null, "status JSON carries repo kind");
+        expect(&ctx, std.mem.indexOf(u8, res_status.stdout, "\"path\":") != null, "status JSON carries repo path");
+        expect(&ctx, std.mem.indexOf(u8, res_status.stdout, "\"url\":") != null, "status JSON carries repo url");
 
         // 2. sync --json
         const res_sync = try fmrRun(&ctx, args, &.{ "sync", "rag-cmd", "--json" }, &pr_env);
         expectExit(&ctx, res_sync, 0, "sync --json exits 0");
         expect(&ctx, std.mem.indexOf(u8, res_sync.stdout, "\"command\": \"sync\"") != null, "sync JSON has command sync");
+        expect(&ctx, std.mem.indexOf(u8, res_sync.stdout, "\"action\": \"noop\"") != null, "sync JSON carries action");
+        expect(&ctx, std.mem.indexOf(u8, res_sync.stdout, "\"before\":") != null, "sync JSON carries before sha");
+        expect(&ctx, std.mem.indexOf(u8, res_sync.stdout, "\"after\":") != null, "sync JSON carries after sha");
+        expect(&ctx, std.mem.indexOf(u8, res_sync.stdout, "\"summary\":") != null, "sync JSON has summary");
 
         // 3. doctor --json
         const res_doc = try fmrRun(&ctx, args, &.{ "doctor", "--json" }, &pr_env);
@@ -763,6 +770,15 @@ fn mainImpl(init: std.process.Init) !u8 {
         const res_rag = try fmrRun(&ctx, args, &.{ "rag", "rag-cmd", "--json" }, &pr_env);
         expectExit(&ctx, res_rag, 0, "rag --json exits 0");
         expect(&ctx, std.mem.indexOf(u8, res_rag.stdout, "\"command\": \"rag\"") != null, "rag JSON has command rag");
+
+        // 6. config --json (catalog dump)
+        const res_cfg = try fmrRun(&ctx, args, &.{"config"}, &pr_env);
+        expectExit(&ctx, res_cfg, 0, "config exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res_cfg.stdout, "\"command\": \"config\"") != null, "config JSON has command config");
+        expect(&ctx, std.mem.indexOf(u8, res_cfg.stdout, "\"name\": \"rag-cmd\"") != null, "config JSON lists repos");
+        expect(&ctx, std.mem.indexOf(u8, res_cfg.stdout, "\"kind\": \"other\"") != null, "config JSON carries kinds");
+        expect(&ctx, std.mem.indexOf(u8, res_cfg.stdout, "\"mode\": \"command\"") != null, "config JSON carries rag mode");
+        expect(&ctx, std.mem.indexOf(u8, res_cfg.stdout, "\"echo-it\"") != null, "config JSON lists named commands");
     }
 
     pr.line(&ctx, .gray, "e2e tmp dir kept for inspection on failure: {s}", .{tmp});

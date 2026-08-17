@@ -35,10 +35,16 @@ pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []
             const r = &rows[i];
             const state_str = @tagName(r.state);
             const snap_str = @tagName(r.snap);
-            const paused = !(cfg.findRepo(name) orelse return 1).sync_enabled;
+            const repo = cfg.findRepo(name) orelse return 1;
+            const paused = !repo.sync_enabled;
+            const kind_str = @tagName(repo.kind);
+            const repo_path = std.Io.Dir.path.join(ctx.alloc, &.{ cfg.paths.repos, name }) catch return 1;
             const entry = std.fmt.allocPrint(ctx.alloc,
                 \\    {{
                 \\      "name": "{s}",
+                \\      "kind": "{s}",
+                \\      "path": "{s}",
+                \\      "url": "{s}",
                 \\      "branch": "{s}",
                 \\      "head": "{s}",
                 \\      "state": "{s}",
@@ -53,6 +59,9 @@ pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []
                 \\
             , .{
                 name,
+                kind_str,
+                repo_path,
+                repo.url orelse "",
                 r.branch,
                 r.head,
                 state_str,

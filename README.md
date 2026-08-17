@@ -176,6 +176,7 @@ fmr <command> [repo...] [flags]
 | `fmr status [repo...] [--json]` | Read-only parallel inspection of git and snapshot state across all or specified repos. |
 | `fmr sync [repo...] [--jobs <n>] [--json]` | Safely fetches and fast-forwards primary checkouts (or clones if missing). |
 | `fmr doctor [--fix] [--json]` | Runs offline health checks. Pass `--fix` to prune stale locks, dead-pid locks, and abandoned staging dirs. |
+| `fmr config [--json]` | Dumps the parsed catalog as JSON (paths, parallelism, per-repo kind/path/url/check/rag/commands) for GUI clients. |
 | `fmr check [repo...] [--json]` | Executes repo test/check command or inherited `kind` default check. |
 | `fmr run <repo> <command> [args...]` | Runs a configured custom command for a repository with environment variable injection. |
 | `fmr rag [repo...] [--force] [--gc <n>] [--json]` | Generates immutable RAG snapshots and updates `current` symlinks. Supports retention GC (`--gc <n>`). |
@@ -241,4 +242,12 @@ Runs 35 automated scenario suites (120+ assertions) against real temporary git f
 - [x] **Slice 2**: RAG snapshot pipeline (`fmr rag`), SHA snapshot directories, atomic symlink swap (`current`), command and files glob exporters.
 - [x] **Slice 3**: Complete 13-repository catalog definition (`config/workspace.example.json`), multi-kind defaults, and backward compatibility.
 - [x] **Slice 4**: Remediation suite (`fmr doctor --fix`), snapshot retention GC (`fmr rag --gc <n>`), and universal structured machine output (`--json`).
+
+---
+
+## 8. Further Reading
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — module map, data flow, safety invariants, JSON output shape, and test strategy for contributors.
+- [`docs/issues/`](docs/issues/) — the slice-by-slice issue specifications that drove each implementation.
+- [`yard-plan.md`](yard-plan.md) — the original scope document (v0.1 draft) this project was built from.
 
