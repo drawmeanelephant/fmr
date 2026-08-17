@@ -27,6 +27,22 @@ public struct WorkspaceDashboardView: View {
                         ForEach(model.filteredRepos) { repo in
                             DashboardRepoRow(repo: repo, model: model)
                                 .tag(repo)
+                                .contextMenu {
+                                    Button("Sync") { model.syncRepo(name: repo.name) }
+                                    Button("Check") { model.checkRepo(name: repo.name) }
+                                    Button("RAG Snapshot") { model.ragRepo(name: repo.name) }
+                                    Divider()
+                                    Button("New Worktree...") {
+                                        model.selectedRepo = repo
+                                        model.isCreateWorktreePresented = true
+                                    }
+                                    Divider()
+                                    Button("Open in Cursor") { model.openIn(editor: .cursor, path: repo.resolvedPath) }
+                                    Button("Open in VS Code") { model.openIn(editor: .vscode, path: repo.resolvedPath) }
+                                    Button("Open in Zed") { model.openIn(editor: .zed, path: repo.resolvedPath) }
+                                    Button("Open in Terminal") { model.openIn(editor: .terminal, path: repo.resolvedPath) }
+                                    Button("Reveal in Finder") { model.openIn(editor: .finder, path: repo.resolvedPath) }
+                                }
                         }
                     }
                 }
@@ -78,6 +94,14 @@ public struct WorkspaceDashboardView: View {
                 }
 
                 Button {
+                    model.isCommandPalettePresented = true
+                } label: {
+                    Image(systemName: "command")
+                }
+                .help("Command Palette (Cmd+K)")
+                .keyboardShortcut("k", modifiers: .command)
+
+                Button {
                     model.refresh()
                 } label: {
                     Image(systemName: "arrow.clockwise")
@@ -101,6 +125,14 @@ public struct WorkspaceDashboardView: View {
         }
         .sheet(isPresented: $model.isDoctorSheetPresented) {
             DoctorSheetView(model: model)
+        }
+        .sheet(isPresented: $model.isCreateWorktreePresented) {
+            if let repo = model.selectedRepo {
+                CreateWorktreeSheet(repoName: repo.name, model: model)
+            }
+        }
+        .sheet(isPresented: $model.isCommandPalettePresented) {
+            CommandPaletteView(model: model)
         }
     }
 }
@@ -196,8 +228,20 @@ struct RepoDetailView: View {
                     // Header
                     HStack(alignment: .center) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(repo.name)
-                                .font(.system(size: 26, weight: .bold))
+                            HStack(spacing: 8) {
+                                Text(repo.name)
+                                    .font(.system(size: 26, weight: .bold))
+
+                                if let k = repo.kind {
+                                    Text(k.uppercased())
+                                        .font(.system(size: 10, weight: .bold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.blue.opacity(0.12))
+                                        .foregroundStyle(.blue)
+                                        .clipShape(Capsule())
+                                }
+                            }
 
                             HStack(spacing: 8) {
                                 Label(repo.branch.isEmpty ? "default_branch" : repo.branch, systemImage: "arrow.triangle.branch")
@@ -211,6 +255,13 @@ struct RepoDetailView: View {
                                         .padding(.vertical, 2)
                                         .background(Color.secondary.opacity(0.12))
                                         .cornerRadius(4)
+                                }
+
+                                if let url = repo.url {
+                                    Text(url)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
                                 }
                             }
                         }
@@ -234,20 +285,17 @@ struct RepoDetailView: View {
                             .buttonStyle(.bordered)
 
                             Menu {
-                                Button("Open in Finder") {
-                                    let path = "\(NSHomeDirectory())/dev/drawmeanelephant/\(repo.name)"
-                                    model.openInFinder(path: path)
-                                }
-                                Button("Open in Terminal") {
-                                    let path = "\(NSHomeDirectory())/dev/drawmeanelephant/\(repo.name)"
-                                    model.openInTerminal(path: path)
-                                }
-                                Button("Open in Code Editor") {
-                                    let path = "\(NSHomeDirectory())/dev/drawmeanelephant/\(repo.name)"
-                                    model.openInEditor(path: path)
+                                Section("Open Repository in:") {
+                                    ForEach(CodeEditor.allCases) { editor in
+                                        Button {
+                                            model.openIn(editor: editor, path: repo.resolvedPath)
+                                        } label: {
+                                            Label(editor.rawValue, systemImage: editor.iconName)
+                                        }
+                                    }
                                 }
                             } label: {
-                                Image(systemName: "ellipsis.circle")
+                                Image(systemName: "square.and.arrow.up")
                             }
                         }
                     }
@@ -273,12 +321,45 @@ struct RepoDetailView: View {
 
                         MetricCard(
                             title: "Conductor Sessions",
-                            value: "\(repo.sessions) Active",
+                            value: "\(sessions.count) Active",
                             subtitle: "Session worktrees in ~/Code",
                             icon: "person.2.badge.gearshape",
                             color: .blue
                         )
                     }
+
+                    // Conductor Worktrees Management Section
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Label("Conductor Worktrees (\(sessions.count))", systemImage: "point.topleft.down.curvedto.point.filled.bottomright.up")
+                                .font(.headline)
+
+                            Spacer()
+
+                            Button {
+                                model.isCreateWorktreePresented = true
+                            } label: {
+                                Label("New Worktree...", systemImage: "plus")
+                            }
+                            .buttonStyle(.bordered)
+                        }
+
+                        if sessions.isEmpty {
+                            Text("No active session worktrees. Agents run isolated feature branches here.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 8)
+                        } else {
+                            VStack(spacing: 8) {
+                                ForEach(sessions) { s in
+                                    WorktreeSessionRow(session: s, model: model)
+                                }
+                            }
+                        }
+                    }
+                    .padding(14)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(8)
 
                     // RAG Snapshot Section
                     VStack(alignment: .leading, spacing: 10) {
@@ -392,6 +473,55 @@ struct RepoDetailView: View {
                 .background(Color(NSColor.windowBackgroundColor))
             }
         }
+    }
+
+    private var sessions: [WorktreeSession] {
+        model.worktreesByRepo[repo.name] ?? []
+    }
+}
+
+// MARK: - Worktree Session Row
+
+struct WorktreeSessionRow: View {
+    let session: WorktreeSession
+    let model: WorkspaceViewModel
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.sessionName)
+                    .font(.system(.subheadline, design: .monospaced, weight: .semibold))
+                Text(session.path)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Menu {
+                ForEach(CodeEditor.allCases) { editor in
+                    Button {
+                        model.openIn(editor: editor, path: session.path)
+                    } label: {
+                        Label("Open in \(editor.rawValue)", systemImage: editor.iconName)
+                    }
+                }
+
+                Divider()
+
+                Button("Remove Worktree", role: .destructive) {
+                    model.removeWorktree(session: session, force: false)
+                }
+            } label: {
+                Label("Open in...", systemImage: "arrow.up.right.square")
+                    .font(.caption)
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(10)
+        .background(Color(NSColor.windowBackgroundColor))
+        .cornerRadius(6)
     }
 }
 

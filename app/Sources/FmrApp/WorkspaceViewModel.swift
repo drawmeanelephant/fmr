@@ -28,6 +28,8 @@ public final class WorkspaceViewModel: @unchecked Sendable {
     public var doctorProblemsCount: Int = 0
     public var doctorWarningsCount: Int = 0
     public var isDoctorSheetPresented: Bool = false
+    public var isCreateWorktreePresented: Bool = false
+    public var isCommandPalettePresented: Bool = false
 
     public var searchQuery: String = ""
     public var selectedFilter: RepoFilter = .all
@@ -73,12 +75,16 @@ public final class WorkspaceViewModel: @unchecked Sendable {
             case .dirty:
                 return repo.isDirty || repo.isBehind || repo.isSnapStale || repo.state != "ok"
             case .zig:
+                if let k = repo.kind { return k == "zig" }
                 return ["boris", "oliver", "DipshitOS"].contains(repo.name)
             case .go:
+                if let k = repo.kind { return k == "go" }
                 return ["know", "codex-limits"].contains(repo.name)
             case .sites:
+                if let k = repo.kind { return k == "site" }
                 return ["fullonrogues.org", "thermalextractiondevices.com", "corgifever.com"].contains(repo.name)
             case .tools:
+                if let k = repo.kind { return k == "bash" || k == "other" }
                 return ["rotkeeper", "minutes-without-motion", "la-famille", "filed.fyi", "apex"].contains(repo.name)
             }
         }
@@ -229,7 +235,50 @@ public final class WorkspaceViewModel: @unchecked Sendable {
         }
     }
 
-    // MARK: - Worktree Discovery
+    // MARK: - Worktree Management
+
+    @MainActor
+    public func createWorktree(repoName: String, sessionName: String, branch: String) {
+        let home = NSHomeDirectory()
+        let repoPath = "\(home)/dev/drawmeanelephant/\(repoName)"
+        let targetPath = "\(home)/Code/worktrees/\(repoName)/\(sessionName)"
+
+        runTask(description: "Creating worktree '\(sessionName)' for \(repoName)...") {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            proc.arguments = ["-C", repoPath, "worktree", "add", targetPath, "-b", branch]
+            try proc.run()
+            proc.waitUntilExit()
+
+            if proc.terminationStatus == 0 {
+                return "Worktree created at \(targetPath)"
+            } else {
+                throw NSError(domain: "fmr", code: Int(proc.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "Git worktree add failed with exit \(proc.terminationStatus)"])
+            }
+        }
+    }
+
+    @MainActor
+    public func removeWorktree(session: WorktreeSession, force: Bool = false) {
+        let home = NSHomeDirectory()
+        let repoPath = "\(home)/dev/drawmeanelephant/\(session.repoName)"
+
+        runTask(description: "Removing worktree '\(session.sessionName)'...") {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            var args = ["-C", repoPath, "worktree", "remove", session.path]
+            if force { args.append("--force") }
+            proc.arguments = args
+            try proc.run()
+            proc.waitUntilExit()
+
+            if proc.terminationStatus == 0 {
+                return "Worktree removed: \(session.sessionName)"
+            } else {
+                throw NSError(domain: "fmr", code: Int(proc.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "Git worktree remove failed with exit \(proc.terminationStatus)"])
+            }
+        }
+    }
 
     private func discoverWorktrees() {
         let home = NSHomeDirectory()
@@ -248,11 +297,20 @@ public final class WorkspaceViewModel: @unchecked Sendable {
                     for s in sessions {
                         if s.hasPrefix(".") { continue }
                         let sPath = "\(repoWorktreesPath)/\(s)"
+
+                        // Query branch
+                        var branchName: String? = nil
+                        let headFile = "\(sPath)/.git"
+                        if let content = try? String(contentsOfFile: headFile, encoding: .utf8) {
+                            branchName = content.trimmingCharacters(in: .whitespacesAndNewlines)
+                        }
+
                         sessionList.append(WorktreeSession(
                             repoName: repoName,
                             sessionName: s,
                             path: sPath,
-                            branch: nil
+                            branch: branchName,
+                            headSha: nil
                         ))
                     }
                     map[repoName] = sessionList
@@ -262,23 +320,40 @@ public final class WorkspaceViewModel: @unchecked Sendable {
         self.worktreesByRepo = map
     }
 
-    // MARK: - Openers
+    // MARK: - Editor Launchers
 
-    public func openInFinder(path: String) {
-        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
-    }
-
-    public func openInTerminal(path: String) {
-        let script = "tell application \"Terminal\" to do script \"cd \(path)\""
-        if let appleScript = NSAppleScript(source: script) {
-            var error: NSDictionary?
-            appleScript.executeAndReturnError(&error)
+    public func openIn(editor: CodeEditor, path: String) {
+        switch editor {
+        case .finder:
+            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
+        case .terminal:
+            let script = "tell application \"Terminal\" to do script \"cd \(path)\""
+            if let appleScript = NSAppleScript(source: script) {
+                var error: NSDictionary?
+                appleScript.executeAndReturnError(&error)
+            }
+        default:
+            if let bundleId = editor.bundleIdentifier,
+               let appUrl = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+                let config = NSWorkspace.OpenConfiguration()
+                NSWorkspace.shared.open([URL(fileURLWithPath: path)], withApplicationAt: appUrl, configuration: config, completionHandler: nil)
+            } else {
+                let url = URL(fileURLWithPath: path)
+                NSWorkspace.shared.open(url)
+            }
         }
     }
 
+    public func openInFinder(path: String) {
+        openIn(editor: .finder, path: path)
+    }
+
+    public func openInTerminal(path: String) {
+        openIn(editor: .terminal, path: path)
+    }
+
     public func openInEditor(path: String) {
-        let url = URL(fileURLWithPath: path)
-        NSWorkspace.shared.open(url)
+        openIn(editor: .cursor, path: path)
     }
 
     // MARK: - Helper
