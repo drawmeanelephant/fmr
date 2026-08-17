@@ -1,7 +1,7 @@
 # Issue 15: Repository Onboarding, `fmr add` CLI, & Native GUI Import Sheet
 
 **Slice**: Onboarding & Repo Lifecycle  
-**Parent Plan**: [`implementation_plan.md`](../../implementation_plan.md)  
+**Parent Plan**: [`docs/gui/README.md`](../../docs/gui/README.md)  
 **Spec Document**: `docs/issues/issue-10-repo-management-and-import.md`
 
 ---
@@ -31,23 +31,23 @@ Eliminate the friction of manually modifying `workspace.json` by providing strea
 ## 2. Technical Specification
 
 ### A. Core CLI Engine Updates
-- [`src/config.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/config.zig):
+- [`src/config.zig`](../../src/config.zig):
   - Add `addRepoToConfigFile(allocator, config_path, repo_entry)` that parses JSON, appends to `repos`, and serializes back with pretty indentation.
   - Add `removeRepoFromConfigFile(allocator, config_path, repo_name)`.
-- [`src/main.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/main.zig):
+- [`src/main.zig`](../../src/main.zig):
   - Parse `fmr add <name> <url> [--kind <kind>] [--branch <branch>] [--no-sync]` and dispatch.
   - Parse `fmr remove <name>`.
 
 ### B. Swift GUI Updates
-- [`app/Sources/FmrApp/Views/AddRepoSheet.swift`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/app/Sources/FmrApp/Views/AddRepoSheet.swift):
+- [`app/Sources/FmrApp/Views/AddRepoSheet.swift`](../../app/Sources/FmrApp/Views/AddRepoSheet.swift):
   - Tabbed or unified input: Git Remote URL vs Local Directory.
   - Auto-detection heuristics for repo name and kind.
   - Checkboxes for "Sync immediately" and "Generate RAG snapshot".
-- [`app/Sources/FmrApp/WorkspaceViewModel.swift`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/app/Sources/FmrApp/WorkspaceViewModel.swift):
+- [`app/Sources/FmrApp/WorkspaceViewModel.swift`](../../app/Sources/FmrApp/WorkspaceViewModel.swift):
   - Add `addRepository(name: String, url: String, kind: String, defaultBranch: String, syncNow: Bool, ragNow: Bool)`
   - Add `removeRepository(name: String)`
   - Add `isAddRepoPresented: Bool`
-- [`app/Sources/FmrApp/Views/WorkspaceDashboardView.swift`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/app/Sources/FmrApp/Views/WorkspaceDashboardView.swift):
+- [`app/Sources/FmrApp/Views/WorkspaceDashboardView.swift`](../../app/Sources/FmrApp/Views/WorkspaceDashboardView.swift):
   - Add `+` button in sidebar header.
   - Add `.onDrop(of: [.fileURL], isTargeted: ...)` to allow dragging folders from Finder into sidebar.
 

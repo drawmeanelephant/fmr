@@ -2,6 +2,7 @@
 
 **Slice**: GUI-1 (Core Swift Foundation)
 **Parent Plan**: [`docs/gui/README.md`](./README.md), JSON contract: [`docs/gui/json-contract.md`](./json-contract.md)
+**Task spec**: [`docs/issues/issue-05-gui-1-swift-bridge-and-models.md`](../issues/issue-05-gui-1-swift-bridge-and-models.md) (on conflict, the issue spec wins)
 **Depends On**: fmr `--json` (all commands emit it — verified)
 
 > Revision 2 corrects the model shapes against the *implemented* fmr JSON

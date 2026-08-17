@@ -86,10 +86,10 @@ Every generated snapshot directory contains `manifest.json`:
 
 ## 4. Files to Touch / Create
 
-- [`src/rag.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/rag.zig) *(new)*: RAG snapshot coordinator, staging manager, file glob copier, atomic symlinker, and manifest writer.
-- [`src/config.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/config.zig): Parse `rag.command` and `rag.files` structures.
-- [`src/main.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/main.zig): Wire `rag` command dispatch and `--force` flag.
-- [`src/test_e2e.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/test_e2e.zig): Add E2E fixture test scenarios covering:
+- [`src/rag.zig`](../../src/rag.zig) *(new)*: RAG snapshot coordinator, staging manager, file glob copier, atomic symlinker, and manifest writer.
+- [`src/config.zig`](../../src/config.zig): Parse `rag.command` and `rag.files` structures.
+- [`src/main.zig`](../../src/main.zig): Wire `rag` command dispatch and `--force` flag.
+- [`src/test_e2e.zig`](../../src/test_e2e.zig): Add E2E fixture test scenarios covering:
   - `rag` with `command` mode: validates staging, manifest, and `current` symlink.
   - `rag` idempotency on second run without changes.
   - `rag --force` re-executing export.

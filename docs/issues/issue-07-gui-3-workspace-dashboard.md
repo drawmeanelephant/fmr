@@ -1,7 +1,7 @@
 # Issue 7: Full Workspace Dashboard Window (`WorkspaceDashboardView`)
 
 **Slice**: GUI-3 (Full Workspace Dashboard)  
-**Parent Plan**: [`implementation_plan.md`](../../implementation_plan.md)  
+**Parent Plan**: [`docs/gui/README.md`](../../docs/gui/README.md)  
 **Depends On**: GUI-1 (Issue #5), GUI-2 (Issue #6)
 
 ---
@@ -15,7 +15,7 @@ Build the full-featured macOS multi-pane dashboard window for managing the 13 wo
 ## 2. Technical Specification
 
 ### Files to Create
-- [`app/Sources/FmrApp/Views/WorkspaceDashboardView.swift`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/app/Sources/FmrApp/Views/WorkspaceDashboardView.swift):
+- [`app/Sources/FmrApp/Views/WorkspaceDashboardView.swift`](../../app/Sources/FmrApp/Views/WorkspaceDashboardView.swift):
   - **Sidebar (`NavigationSplitView`)**:
     - Search field for filtering repos by name or branch.
     - Category filters: All (13), Zig, Go, Sites, Tools, Problem/Dirty.
