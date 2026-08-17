@@ -76,6 +76,35 @@ public struct MenuBarView: View {
             }
             .frame(maxHeight: 280)
 
+            // Recent Repositories (remembered onboarding)
+            if !model.recentRepos.isEmpty {
+                Divider()
+
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("Recent Repositories")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button {
+                            model.clearRecentRepos()
+                        } label: {
+                            Text("Clear")
+                                .font(.caption2)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Clear recent repositories")
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+
+                    ForEach(model.recentRepos) { entry in
+                        MenuBarRecentRow(entry: entry, model: model)
+                    }
+                }
+                .padding(.bottom, 4)
+            }
+
             Divider()
 
             // Footer Actions
@@ -155,6 +184,75 @@ struct StatusPill: View {
             .background(color.opacity(0.15))
             .foregroundStyle(color)
             .clipShape(Capsule())
+    }
+}
+
+// MARK: - Recent Repository Row
+
+struct MenuBarRecentRow: View {
+    let entry: RecentRepoEntry
+    let model: WorkspaceViewModel
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.primary)
+
+                HStack(spacing: 4) {
+                    if let kind = entry.kind, !kind.isEmpty {
+                        Text(kind)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let url = entry.url, !url.isEmpty {
+                        Text(url)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+
+            Spacer()
+
+            if isHovering {
+                HStack(spacing: 4) {
+                    Button {
+                        model.cloneAndOpenRecent(entry)
+                    } label: {
+                        Image(systemName: "arrow.up.right.square.fill")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Clone & Open \(entry.name)")
+
+                    Button {
+                        model.forgetRepo(name: entry.name)
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Remove from Recents")
+                }
+            } else {
+                Text(entry.addedAt.formatted(.relative(presentation: .named)))
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(isHovering ? Color(NSColor.selectedControlColor).opacity(0.1) : Color.clear)
+        .cornerRadius(4)
+        .onHover { isHovering = $0 }
     }
 }
 

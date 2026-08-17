@@ -41,12 +41,65 @@ public final class WorkspaceViewModel: @unchecked Sendable {
     public var catalog: [String: ConfigRepoItem] = [:]
     public var catalogLoaded: Bool = false
 
-    private let bridge: FMRBridge
-    private var timer: Timer?
+    // Repositories the user has onboarded through the app (persisted).
+    public private(set) var recentRepos: [RecentRepoEntry] = []
 
-    public init(bridge: FMRBridge = .shared) {
+    private let bridge: FMRBridge
+    private let defaults: UserDefaults
+    private var timer: Timer?
+    private static let recentReposKey = "fmr.recentRepos.v1"
+    private static let recentReposLimit = 10
+
+    public init(bridge: FMRBridge = .shared, defaults: UserDefaults = .standard) {
         self.bridge = bridge
+        self.defaults = defaults
+        loadRecentRepos()
         loadCatalog()
+    }
+
+    // MARK: - Recent Repositories (persisted)
+
+    private func loadRecentRepos() {
+        guard let data = defaults.data(forKey: Self.recentReposKey),
+              let decoded = try? JSONDecoder().decode([RecentRepoEntry].self, from: data) else {
+            return
+        }
+        recentRepos = decoded
+    }
+
+    private func persistRecentRepos() {
+        if let data = try? JSONEncoder().encode(recentRepos) {
+            defaults.set(data, forKey: Self.recentReposKey)
+        }
+    }
+
+    /// Records a repo in the recents list (deduped by name, newest first, capped).
+    public func rememberRepo(name: String, url: String?, kind: String?, defaultBranch: String?) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        recentRepos.removeAll { $0.name == trimmed }
+        recentRepos.insert(RecentRepoEntry(
+            name: trimmed,
+            url: url?.trimmingCharacters(in: .whitespacesAndNewlines),
+            kind: kind,
+            defaultBranch: defaultBranch
+        ), at: 0)
+        if recentRepos.count > Self.recentReposLimit {
+            recentRepos = Array(recentRepos.prefix(Self.recentReposLimit))
+        }
+        persistRecentRepos()
+    }
+
+    /// Removes a repo from the recents list.
+    public func forgetRepo(name: String) {
+        recentRepos.removeAll { $0.name == name }
+        persistRecentRepos()
+    }
+
+    /// Clears the recents list.
+    public func clearRecentRepos() {
+        recentRepos = []
+        persistRecentRepos()
     }
 
     /// Loads the workspace catalog (`fmr config --json`) so the UI never
@@ -356,7 +409,42 @@ public final class WorkspaceViewModel: @unchecked Sendable {
             if ragNow {
                 let _: RagResponse? = try? await self.bridge.run(["rag", trimmedName])
             }
+            self.rememberRepo(name: trimmedName, url: url, kind: kind, defaultBranch: defaultBranch)
             return "Added repository '\(trimmedName)' to workspace."
+        }
+    }
+
+    /// Clone (if not already present) and open a recent repo in the default editor.
+    /// If the repo is unregistered, runs `fmr add <name> <url> --sync` to clone it;
+    /// otherwise just opens the existing checkout.
+    /// Clone (if not already present) and open a recent repo in the default editor.
+    /// If the repo is unregistered, runs `fmr add <name> <url> --sync` to clone it;
+    /// otherwise just opens the existing checkout.
+    @MainActor
+    public func cloneAndOpenRecent(_ entry: RecentRepoEntry) {
+        let alreadyRegistered = repos.contains { $0.name == entry.name }
+        let targetPath = "\(reposRoot)/\(entry.name)"
+
+        runTask(description: "Opening '\(entry.name)'...", onSuccess: { [weak self] in
+            guard let self else { return }
+            if FileManager.default.fileExists(atPath: targetPath) {
+                self.openIn(editor: .cursor, path: targetPath)
+            } else {
+                self.lastTaskOutput.append("Checkout not found at \(targetPath)\n")
+            }
+        }) {
+            if !alreadyRegistered, let url = entry.url, !url.isEmpty {
+                var args = ["add", entry.name, url, "--sync"]
+                if let kind = entry.kind, !kind.isEmpty { args += ["--kind", kind] }
+                if let branch = entry.defaultBranch, !branch.isEmpty { args += ["--branch", branch] }
+                let res = try await self.bridge.execute(arguments: args)
+                guard res.exitCode == 0 else {
+                    let msg = res.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                    throw NSError(domain: "fmr", code: Int(res.exitCode), userInfo: [NSLocalizedDescriptionKey: msg.isEmpty ? "Failed to clone \(entry.name)" : msg])
+                }
+                self.rememberRepo(name: entry.name, url: entry.url, kind: entry.kind, defaultBranch: entry.defaultBranch)
+            }
+            return "Opening \(entry.name) at \(targetPath)"
         }
     }
 
@@ -606,7 +694,7 @@ public final class WorkspaceViewModel: @unchecked Sendable {
     // MARK: - Helper
 
     @MainActor
-    private func runTask(description: String, operation: @escaping () async throws -> String) {
+    private func runTask(description: String, onSuccess: (@MainActor () -> Void)? = nil, operation: @escaping () async throws -> String) {
         isRefreshing = true
         activeTaskDescription = description
         lastTaskOutput = "\(description)\n"
@@ -619,6 +707,7 @@ public final class WorkspaceViewModel: @unchecked Sendable {
                     self.activeTaskDescription = nil
                     self.isRefreshing = false
                     self.refresh(silent: true)
+                    onSuccess?()
                 }
             } catch {
                 await MainActor.run {

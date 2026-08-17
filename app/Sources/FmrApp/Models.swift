@@ -205,6 +205,27 @@ public struct RagConfig: Codable, Sendable {
     public let mode: String?
 }
 
+// MARK: - Recent Repository Model
+
+/// A repository the user has onboarded through the app, remembered so they can
+/// quickly clone-and-open it again from the menu bar.
+public struct RecentRepoEntry: Codable, Identifiable, Hashable, Sendable {
+    public var id: String { name }
+    public let name: String
+    public let url: String?
+    public let kind: String?
+    public let defaultBranch: String?
+    public let addedAt: Date
+
+    public init(name: String, url: String?, kind: String?, defaultBranch: String?, addedAt: Date = Date()) {
+        self.name = name
+        self.url = url
+        self.kind = kind
+        self.defaultBranch = defaultBranch
+        self.addedAt = addedAt
+    }
+}
+
 // MARK: - Session / Worktree Model
 
 public struct WorktreeSession: Identifiable, Hashable, Sendable {

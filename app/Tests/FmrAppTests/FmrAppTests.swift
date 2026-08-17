@@ -221,6 +221,57 @@ final class FmrAppTests: XCTestCase {
         XCTAssertEqual(WorkspaceViewModel.detectKind(in: tmp), "node")
     }
 
+    func testRecentReposDedupeAndCap() throws {
+        let suite = "fmr-test-recents-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let model = WorkspaceViewModel(bridge: FMRBridge(), defaults: defaults)
+        XCTAssertTrue(model.recentRepos.isEmpty)
+
+        model.rememberRepo(name: "boris", url: "git@github.com:drawmeanelephant/boris.git", kind: "zig", defaultBranch: "main")
+        model.rememberRepo(name: "oliver", url: "git@github.com:drawmeanelephant/oliver.git", kind: "go", defaultBranch: nil)
+        XCTAssertEqual(model.recentRepos.count, 2)
+        // newest first
+        XCTAssertEqual(model.recentRepos.first?.name, "oliver")
+
+        // re-adding dedupes and bumps to front
+        model.rememberRepo(name: "boris", url: "git@github.com:drawmeanelephant/boris.git", kind: "zig", defaultBranch: "main")
+        XCTAssertEqual(model.recentRepos.count, 2)
+        XCTAssertEqual(model.recentRepos.first?.name, "boris")
+
+        // cap at limit
+        for i in 0..<20 {
+            model.rememberRepo(name: "repo-\(i)", url: nil, kind: nil, defaultBranch: nil)
+        }
+        XCTAssertEqual(model.recentRepos.count, 10)
+        XCTAssertEqual(model.recentRepos.first?.name, "repo-19")
+        XCTAssertFalse(model.recentRepos.contains { $0.name == "boris" })
+
+        // forget + clear
+        model.forgetRepo(name: "repo-19")
+        XCTAssertEqual(model.recentRepos.count, 9)
+        model.clearRecentRepos()
+        XCTAssertTrue(model.recentRepos.isEmpty)
+    }
+
+    func testRecentReposPersistAcrossInstances() throws {
+        let suite = "fmr-test-recents-persist-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let first = WorkspaceViewModel(bridge: FMRBridge(), defaults: defaults)
+        first.rememberRepo(name: "boris", url: "git@github.com:drawmeanelephant/boris.git", kind: "zig", defaultBranch: "main")
+
+        // a fresh instance loads what the first one persisted
+        let second = WorkspaceViewModel(bridge: FMRBridge(), defaults: defaults)
+        XCTAssertEqual(second.recentRepos.count, 1)
+        XCTAssertEqual(second.recentRepos.first?.name, "boris")
+        XCTAssertEqual(second.recentRepos.first?.url, "git@github.com:drawmeanelephant/boris.git")
+        XCTAssertEqual(second.recentRepos.first?.kind, "zig")
+        XCTAssertEqual(second.recentRepos.first?.defaultBranch, "main")
+    }
+
     func testDecodeRagJson() throws {
         let json = """
         {
