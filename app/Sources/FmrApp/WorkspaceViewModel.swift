@@ -279,15 +279,35 @@ public final class WorkspaceViewModel: @unchecked Sendable {
 
     // MARK: - Worktree Management
 
+    // Confirmation state for removing a dirty worktree.
+    public var pendingRemoveSession: WorktreeSession? = nil
+    public var isConfirmRemoveWorktreePresented: Bool = false
+
     @MainActor
     public func createWorktree(repoName: String, sessionName: String, branch: String) {
-        let repoPath = "\(reposRoot)/\(repoName)"
-        let targetPath = "\(worktreesRoot)/\(repoName)/\(sessionName)"
+        let sName = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bName = branch.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        runTask(description: "Creating worktree '\(sessionName)' for \(repoName)...") {
+        if let err = validateSessionName(sName) {
+            lastTaskOutput = "Cannot create worktree: \(err)"
+            return
+        }
+        if let err = validateBranchName(bName) {
+            lastTaskOutput = "Cannot create worktree: \(err)"
+            return
+        }
+        if let err = gitCheckRef(bName) {
+            lastTaskOutput = "Cannot create worktree: \(err)"
+            return
+        }
+
+        let repoPath = "\(reposRoot)/\(repoName)"
+        let targetPath = "\(worktreesRoot)/\(repoName)/\(sName)"
+
+        runTask(description: "Creating worktree '\(sName)' for \(repoName)...") {
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            proc.arguments = ["-C", repoPath, "worktree", "add", targetPath, "-b", branch]
+            proc.arguments = ["-C", repoPath, "worktree", "add", targetPath, "-b", bName]
             try proc.run()
             proc.waitUntilExit()
 
@@ -299,8 +319,38 @@ public final class WorkspaceViewModel: @unchecked Sendable {
         }
     }
 
+    /// Entry point for removal: if the worktree is dirty, present a
+    /// confirmation dialog (removing with --force discards uncommitted work).
+    @MainActor
+    public func requestRemoveWorktree(_ session: WorktreeSession) {
+        if isWorktreeDirty(session.path) {
+            pendingRemoveSession = session
+            isConfirmRemoveWorktreePresented = true
+        } else {
+            removeWorktree(session: session, force: false)
+        }
+    }
+
+    /// Called from the confirmation dialog once the user approves removal.
+    @MainActor
+    public func confirmRemoveWorktree(force: Bool) {
+        defer {
+            pendingRemoveSession = nil
+            isConfirmRemoveWorktreePresented = false
+        }
+        guard let session = pendingRemoveSession else { return }
+        removeWorktree(session: session, force: force)
+    }
+
     @MainActor
     public func removeWorktree(session: WorktreeSession, force: Bool = false) {
+        // A session that no longer exists on disk is a no-op (stale row).
+        if !FileManager.default.fileExists(atPath: session.path) {
+            lastTaskOutput = "Worktree '\(session.sessionName)' no longer exists; removed from list."
+            discoverWorktrees()
+            return
+        }
+
         let repoPath = "\(reposRoot)/\(session.repoName)"
 
         runTask(description: "Removing worktree '\(session.sessionName)'...") {
@@ -317,6 +367,69 @@ public final class WorkspaceViewModel: @unchecked Sendable {
             } else {
                 throw NSError(domain: "fmr", code: Int(proc.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "Git worktree remove failed with exit \(proc.terminationStatus)"])
             }
+        }
+    }
+
+    // MARK: - Worktree Validation
+
+    /// Returns an error message if `session` is not a safe session folder name, else nil.
+    public func validateSessionName(_ session: String) -> String? {
+        let trimmed = session.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Session name is required." }
+        guard trimmed != "." && trimmed != ".." else { return "'\(trimmed)' is not a valid session name." }
+        guard !trimmed.hasPrefix(".") else { return "Session name cannot start with '.'." }
+        guard !trimmed.contains("/") && !trimmed.contains("\\") else { return "Session name cannot contain path separators." }
+        return nil
+    }
+
+    /// Returns an error message if `branch` is not a valid git branch name, else nil.
+    public func validateBranchName(_ branch: String) -> String? {
+        let trimmed = branch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Branch name is required." }
+        guard !trimmed.hasPrefix("-") else { return "Branch name cannot start with '-'." }
+        guard !trimmed.hasSuffix("/") && !trimmed.hasSuffix(".") else { return "Branch name cannot end with '/' or '.'." }
+        guard trimmed != "@" else { return "'@' is not a valid branch name." }
+        guard !trimmed.contains("..") else { return "Branch name cannot contain '..'." }
+        let forbidden = CharacterSet(charactersIn: " ~^:?*[\\")
+        for scalar in trimmed.unicodeScalars {
+            if forbidden.contains(scalar) || scalar.value < 0x20 || scalar.value == 0x7F {
+                return "Branch name contains invalid characters."
+            }
+        }
+        return nil
+    }
+
+    /// Authoritative git check (`git check-ref-format --branch`). Returns nil if valid.
+    public func gitCheckRef(_ branch: String) -> String? {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        proc.arguments = ["check-ref-format", "--branch", branch]
+        proc.standardOutput = Pipe()
+        proc.standardError = Pipe()
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            return proc.terminationStatus == 0 ? nil : "git rejected branch name '\(branch)'."
+        } catch {
+            return "Could not run git check-ref-format."
+        }
+    }
+
+    /// True when the worktree has uncommitted changes (status --porcelain non-empty).
+    private func isWorktreeDirty(_ path: String) -> Bool {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        proc.arguments = ["-C", path, "status", "--porcelain"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = Pipe()
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return !data.isEmpty
+        } catch {
+            return true // conservative: if we cannot check, ask before removing
         }
     }
 
