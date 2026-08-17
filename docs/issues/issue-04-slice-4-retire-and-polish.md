@@ -53,11 +53,11 @@ All commands accept `--json` to output pure, parseable JSON on stdout:
 
 ## 3. Files to Touch / Create
 
-- [`src/rag.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/rag.zig): Add GC retention pruning logic.
-- [`src/doctor.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/doctor.zig): Add `--fix` handler.
-- [`src/main.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/main.zig): Add `--json` flag handling and output routing.
-- [`src/status.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/status.zig), [`src/sync.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/sync.zig): Add JSON serialization builders.
-- [`src/test_e2e.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/test_e2e.zig): Add E2E tests for `--gc`, `--fix`, and `jq`-parseable `--json` output.
+- [`src/rag.zig`](../../src/rag.zig): Add GC retention pruning logic.
+- [`src/doctor.zig`](../../src/doctor.zig): Add `--fix` handler.
+- [`src/main.zig`](../../src/main.zig): Add `--json` flag handling and output routing.
+- [`src/status.zig`](../../src/status.zig), [`src/sync.zig`](../../src/sync.zig): Add JSON serialization builders.
+- [`src/test_e2e.zig`](../../src/test_e2e.zig): Add E2E tests for `--gc`, `--fix`, and `jq`-parseable `--json` output.
 
 ---
 

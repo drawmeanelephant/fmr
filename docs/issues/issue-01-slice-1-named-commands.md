@@ -47,10 +47,10 @@ This separates sync (fast-forward git state) from test/execution, honoring the p
 
 ## 3. Files to Touch / Create
 
-- [`src/main.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/main.zig): Wire `check` and `run` command dispatch.
-- [`src/config.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/config.zig): Add support for repo-level and kind-level `check` and `commands` schema definitions.
-- [`src/exec.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/exec.zig) *(new)*: Subprocess runner handling placeholder expansion, sequential execution, formatted output, and exit code aggregation.
-- [`src/test_e2e.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/test_e2e.zig): Add E2E fixture test scenarios covering:
+- [`src/main.zig`](../../src/main.zig): Wire `check` and `run` command dispatch.
+- [`src/config.zig`](../../src/config.zig): Add support for repo-level and kind-level `check` and `commands` schema definitions.
+- [`src/exec.zig`](../../src/exec.zig) *(new)*: Subprocess runner handling placeholder expansion, sequential execution, formatted output, and exit code aggregation.
+- [`src/test_e2e.zig`](../../src/test_e2e.zig): Add E2E fixture test scenarios covering:
   - `fmr check` using repo kind default.
   - `fmr check` using repo-specific check argv.
   - `fmr check` on repo with no check defined (`[skip]`).

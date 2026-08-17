@@ -33,9 +33,9 @@ Migrate all 13 production workspace repositories into the `fmr` catalog (`worksp
 
 ## 3. Files to Touch / Create
 
-- Default config template at [`config/workspace.example.json`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/config/workspace.example.json) or user config at `~/config/fmr/workspace.json`.
+- Default config template at [`config/workspace.example.json`](../../config/workspace.example.json) or user config at `~/config/fmr/workspace.json`.
 - Exporter wrapper scripts / python scripts in workspace repos to support `argv[1]` as target directory if provided, falling back to legacy flat `source-rag` directory if omitted.
-- [`src/doctor.zig`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/src/doctor.zig): Verify doctor handles all 13 repo configurations and accurately reports on root paths, branch statuses, and lock contention.
+- [`src/doctor.zig`](../../src/doctor.zig): Verify doctor handles all 13 repo configurations and accurately reports on root paths, branch statuses, and lock contention.
 
 ---
 

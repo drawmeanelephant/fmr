@@ -1,7 +1,7 @@
 # Issue 13: GUI-5: Worktree Management, Extended Metadata Models, & Editor Launchers
 
 **Slice**: GUI-5 (Worktree Operations & Deep Editor Integration)  
-**Parent Plan**: [`implementation_plan.md`](../../implementation_plan.md)  
+**Parent Plan**: [`docs/gui/README.md`](../../docs/gui/README.md)  
 **Depends On**: GUI-1 through GUI-4 (Issues #8-#11)
 
 ---
@@ -28,12 +28,12 @@ Elevate the SwiftUI application with active worktree management, extended metada
 
 ## 2. Files to Touch / Create
 
-- [`app/Sources/FmrApp/Models.swift`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/app/Sources/FmrApp/Models.swift): Update `RepoStatus`, `SyncOutcome`, and add `ConfigResponse`.
-- [`app/Sources/FmrApp/WorkspaceViewModel.swift`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/app/Sources/FmrApp/WorkspaceViewModel.swift): Add worktree creation/removal methods, editor launch dispatch, and config query.
-- [`app/Sources/FmrApp/Views/CreateWorktreeSheet.swift`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/app/Sources/FmrApp/Views/CreateWorktreeSheet.swift): New modal sheet for worktree creation.
-- [`app/Sources/FmrApp/Views/WorktreeDetailView.swift`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/app/Sources/FmrApp/Views/WorktreeDetailView.swift): Detailed worktree session card with editor buttons.
-- [`app/Sources/FmrApp/Views/WorkspaceDashboardView.swift`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/app/Sources/FmrApp/Views/WorkspaceDashboardView.swift): Add Worktrees section, `Cmd+K` command palette, and editor menu.
-- [`app/Sources/FmrApp/Views/CommandPaletteView.swift`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/app/Sources/FmrApp/Views/CommandPaletteView.swift): `Cmd+K` quick switcher.
+- [`app/Sources/FmrApp/Models.swift`](../../app/Sources/FmrApp/Models.swift): Update `RepoStatus`, `SyncOutcome`, and add `ConfigResponse`.
+- [`app/Sources/FmrApp/WorkspaceViewModel.swift`](../../app/Sources/FmrApp/WorkspaceViewModel.swift): Add worktree creation/removal methods, editor launch dispatch, and config query.
+- [`app/Sources/FmrApp/Views/CreateWorktreeSheet.swift`](../../app/Sources/FmrApp/Views/CreateWorktreeSheet.swift): New modal sheet for worktree creation.
+- [`app/Sources/FmrApp/Views/WorktreeDetailView.swift`](../../app/Sources/FmrApp/Views/WorktreeDetailView.swift): Detailed worktree session card with editor buttons.
+- [`app/Sources/FmrApp/Views/WorkspaceDashboardView.swift`](../../app/Sources/FmrApp/Views/WorkspaceDashboardView.swift): Add Worktrees section, `Cmd+K` command palette, and editor menu.
+- [`app/Sources/FmrApp/Views/CommandPaletteView.swift`](../../app/Sources/FmrApp/Views/CommandPaletteView.swift): `Cmd+K` quick switcher.
 
 ---
 

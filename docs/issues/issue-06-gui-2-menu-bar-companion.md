@@ -1,7 +1,7 @@
 # Issue 6: macOS Menu Bar Companion Popover (`MenuBarView`)
 
 **Slice**: GUI-2 (Menu Bar Companion)  
-**Parent Plan**: [`implementation_plan.md`](../../implementation_plan.md)  
+**Parent Plan**: [`docs/gui/README.md`](../../docs/gui/README.md)  
 **Depends On**: GUI-1 (Issue #5)
 
 ---
@@ -15,10 +15,10 @@ Build the lightweight macOS `MenuBarExtra` status bar companion popover that pro
 ## 2. Technical Specification
 
 ### Files to Create / Modify
-- [`app/Sources/FmrApp/FmrApp.swift`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/app/Sources/FmrApp/FmrApp.swift):
+- [`app/Sources/FmrApp/FmrApp.swift`](../../app/Sources/FmrApp/FmrApp.swift):
   - Declares `MenuBarExtra("fmr", systemImage: "arrow.triangle.2.circlepath")` with `.window` style popover.
   - Declares `WindowGroup(id: "dashboard") { WorkspaceDashboardView(...) }` for the full window.
-- [`app/Sources/FmrApp/Views/MenuBarView.swift`](file:///Users/tbuddy/Documents/antigravity/fuckmerunning/app/Sources/FmrApp/Views/MenuBarView.swift):
+- [`app/Sources/FmrApp/Views/MenuBarView.swift`](../../app/Sources/FmrApp/Views/MenuBarView.swift):
   - **Summary Banner**: Pills for `Clean (N)`, `Behind (N)`, `Dirty (N)`, `Stale Snap (N)`.
   - **Repository Scroll Area**:
     - Repo row: name, current branch, status pill (green OK, yellow Behind N, orange Dirty N, red Refused).
