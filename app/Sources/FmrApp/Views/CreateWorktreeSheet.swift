@@ -8,6 +8,18 @@ public struct CreateWorktreeSheet: View {
     @State private var sessionName: String = ""
     @State private var branchName: String = ""
 
+    private var sessionError: String? {
+        model.validateSessionName(sessionName)
+    }
+
+    private var branchError: String? {
+        model.validateBranchName(branchName)
+    }
+
+    private var isValid: Bool {
+        sessionError == nil && branchError == nil
+    }
+
     public init(repoName: String, model: WorkspaceViewModel) {
         self.repoName = repoName
         self.model = model
@@ -45,6 +57,11 @@ public struct CreateWorktreeSheet: View {
                         .foregroundStyle(.secondary)
                     TextField("e.g. session-auth-flow", text: $sessionName)
                         .textFieldStyle(.roundedBorder)
+                    if let err = sessionError {
+                        Text(err)
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -53,6 +70,11 @@ public struct CreateWorktreeSheet: View {
                         .foregroundStyle(.secondary)
                     TextField("e.g. feat/auth-flow", text: $branchName)
                         .textFieldStyle(.roundedBorder)
+                    if let err = branchError {
+                        Text(err)
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
                 }
 
                 Text("Worktree will be created under ~/Code/worktrees/\(repoName)/\(sessionName.isEmpty ? "<session>" : sessionName)")
@@ -74,13 +96,13 @@ public struct CreateWorktreeSheet: View {
                 Button("Create Worktree") {
                     let sName = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
                     let bName = branchName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !sName.isEmpty && !bName.isEmpty else { return }
+                    guard isValid else { return }
 
                     model.createWorktree(repoName: repoName, sessionName: sName, branch: bName)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(sessionName.isEmpty || branchName.isEmpty)
+                .disabled(!isValid)
             }
         }
         .padding(20)

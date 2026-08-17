@@ -156,6 +156,29 @@ final class FmrAppTests: XCTestCase {
         XCTAssertEqual(repo?.commands?["site"], ["zig", "build"])
     }
 
+    func testWorktreeValidation() throws {
+        let model = WorkspaceViewModel(bridge: FMRBridge())
+
+        // Branch names
+        XCTAssertNil(model.validateBranchName("feat/auth-flow"))
+        XCTAssertNil(model.validateBranchName("main"))
+        XCTAssertNotNil(model.validateBranchName(""))
+        XCTAssertNotNil(model.validateBranchName("has space"))
+        XCTAssertNotNil(model.validateBranchName("a..b"))
+        XCTAssertNotNil(model.validateBranchName("-leading"))
+        XCTAssertNotNil(model.validateBranchName("trailing/"))
+        XCTAssertNotNil(model.validateBranchName("@"))
+        XCTAssertNotNil(model.validateBranchName("bad:colon"))
+
+        // Session names
+        XCTAssertNil(model.validateSessionName("session-auth-flow"))
+        XCTAssertNil(model.validateSessionName("session 1"))
+        XCTAssertNotNil(model.validateSessionName(""))
+        XCTAssertNotNil(model.validateSessionName("a/b"))
+        XCTAssertNotNil(model.validateSessionName("../escape"))
+        XCTAssertNotNil(model.validateSessionName(".hidden"))
+    }
+
     func testDecodeRagJson() throws {
         let json = """
         {

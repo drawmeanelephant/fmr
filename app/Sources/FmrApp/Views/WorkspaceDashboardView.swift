@@ -461,6 +461,21 @@ struct RepoDetailView: View {
                 .background(Color(NSColor.windowBackgroundColor))
             }
         }
+        .confirmationDialog(
+            "Remove worktree '\(model.pendingRemoveSession?.sessionName ?? "")'?",
+            isPresented: $model.isConfirmRemoveWorktreePresented,
+            titleVisibility: .visible
+        ) {
+            Button("Remove (discard uncommitted changes)", role: .destructive) {
+                model.confirmRemoveWorktree(force: true)
+            }
+            Button("Cancel", role: .cancel) {
+                model.isConfirmRemoveWorktreePresented = false
+                model.pendingRemoveSession = nil
+            }
+        } message: {
+            Text("This worktree has uncommitted changes. Removing with --force discards them.")
+        }
     }
 
     private var sessions: [WorktreeSession] {
@@ -499,7 +514,7 @@ struct WorktreeSessionRow: View {
                 Divider()
 
                 Button("Remove Worktree", role: .destructive) {
-                    model.removeWorktree(session: session, force: false)
+                    model.requestRemoveWorktree(session)
                 }
             } label: {
                 Label("Open in...", systemImage: "arrow.up.right.square")
