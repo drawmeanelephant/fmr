@@ -34,3 +34,24 @@ jobs:
 
       - name: Run E2E Integration Tests
         run: zig build test-e2e
+
+  gui:
+    name: Build & Test Swift App (macos-latest)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build fmr core
+        run: zig build
+
+      - name: Build Swift App
+        run: swift build --package-path app
+
+      - name: Run Swift Unit Tests
+        run: swift test --package-path app
