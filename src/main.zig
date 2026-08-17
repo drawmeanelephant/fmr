@@ -12,6 +12,10 @@ const exec = @import("exec.zig");
 const rag = @import("rag.zig");
 const ui = @import("ui.zig");
 
+/// Version reported by `fmr --version` and embedded into the packaged app.
+/// Bump when the CLI contract or behavior changes materially.
+pub const version = "0.1.0";
+
 pub fn main(init: std.process.Init) u8 {
     const ctx = process.Ctx{
         .alloc = init.arena.allocator(),
@@ -38,6 +42,10 @@ pub fn main(init: std.process.Init) u8 {
         const a = argv.items[i];
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
             return help(&ctx);
+        } else if (std.mem.eql(u8, a, "--version")) {
+            const out = std.fmt.allocPrint(ctx.alloc, "fmr {s}\n", .{version}) catch "fmr\n";
+            std.Io.File.stdout().writeStreamingAll(ctx.io, out) catch {};
+            return 0;
         } else if (std.mem.eql(u8, a, "--config")) {
             i += 1;
             if (i >= argv.items.len) return usage(&ctx, "missing path after --config");

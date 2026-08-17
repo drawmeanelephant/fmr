@@ -19,7 +19,13 @@ swift build -c release
 SWIFT_BIN="$APP_SRC_DIR/.build/release/FmrApp"
 ZIG_BIN="$WORKSPACE_ROOT/zig-out/bin/fmr"
 
-echo "==> Creating macOS Application Bundle ($APP_BUNDLE)..."
+# Core version reported by fmr --version (e.g. "fmr 0.1.0").
+FMR_VERSION=$("$ZIG_BIN" --version | awk '{print $2}')
+if [ -z "$FMR_VERSION" ]; then
+    FMR_VERSION="0.0.0"
+fi
+
+echo "==> Creating macOS Application Bundle ($APP_BUNDLE) (core v$FMR_VERSION)..."
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
@@ -31,7 +37,7 @@ cp "$ZIG_BIN" "$APP_BUNDLE/Contents/Helpers/fmr"
 chmod +x "$APP_BUNDLE/Contents/MacOS/FmrApp"
 chmod +x "$APP_BUNDLE/Contents/Helpers/fmr"
 
-# Generate Info.plist
+# Generate Info.plist. LSUIElement=true => menu-bar-only app (no Dock icon).
 cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -46,18 +52,25 @@ cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>$FMR_VERSION</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>$FMR_VERSION</string>
+    <key>FMRCoreVersion</key>
+    <string>$FMR_VERSION</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
-    <false/>
+    <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>
 </plist>
 EOF
+
+# Ad-hoc codesign so macOS (Apple Silicon) launches the unsigned GUI binary.
+echo "==> Codesigning bundle..."
+codesign --force --deep --sign - "$APP_BUNDLE"
+codesign --verify --deep --strict "$APP_BUNDLE"
 
 echo "==> Done! Application bundle created at: $APP_BUNDLE"
 echo "    You can run it with: open '$APP_BUNDLE'"

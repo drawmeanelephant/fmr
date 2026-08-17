@@ -790,6 +790,14 @@ fn mainImpl(init: std.process.Init) !u8 {
         expect(&ctx, std.mem.indexOf(u8, res_run_fail.stdout, "\"result\": \"failed\"") != null, "run JSON reports failed");
     }
 
+    current = "--version prints a version string";
+    {
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{"--version"}, &pr_env);
+        expectExit(&ctx, res, 0, "--version exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res.stdout, "fmr ") != null, "--version prints fmr prefix");
+    }
+
     pr.line(&ctx, .gray, "e2e tmp dir kept for inspection on failure: {s}", .{tmp});
     if (failures > 0) {
         pr.line(&ctx, .red, "{d} e2e scenario(s) failed", .{failures});
