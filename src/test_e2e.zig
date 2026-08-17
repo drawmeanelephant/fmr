@@ -131,7 +131,8 @@ fn mainImpl(init: std.process.Init) !u8 {
         \\    {{ "name": "cmd-repo", "url": "{s}/cmd-repo.git", "default_branch": "main",
         \\       "commands": {{
         \\         "show-env": {{ "argv": ["sh", "-c", "echo FMR=$FMR_REPO"] }},
-        \\         "echo-it": {{ "argv": ["echo"] }}
+        \\         "echo-it": {{ "argv": ["echo"] }},
+        \\         "fail": {{ "argv": ["false"] }}
         \\       }} }},
         \\    {{ "name": "rag-cmd", "url": "{s}/rag-cmd.git", "default_branch": "main",
         \\       "rag": {{ "command": {{ "argv": ["sh", "-c", "echo hello > $FMR_RAG_OUT/test.txt"] }} }} }},
@@ -769,9 +770,7 @@ fn mainImpl(init: std.process.Init) !u8 {
         // 5. rag --json
         const res_rag = try fmrRun(&ctx, args, &.{ "rag", "rag-cmd", "--json" }, &pr_env);
         expectExit(&ctx, res_rag, 0, "rag --json exits 0");
-        expect(&ctx, std.mem.indexOf(u8, res_rag.stdout, "\"command\": \"rag\"") != null, "rag JSON has command rag");
-
-        // 6. config --json (catalog dump)
+        expect(&ctx, std.mem.indexOf(u8, res_rag.stdout, "\"command\": \"rag\"") != null, "rag JSON has command rag"); // 6. config --json (catalog dump)
         const res_cfg = try fmrRun(&ctx, args, &.{"config"}, &pr_env);
         expectExit(&ctx, res_cfg, 0, "config exits 0");
         expect(&ctx, std.mem.indexOf(u8, res_cfg.stdout, "\"command\": \"config\"") != null, "config JSON has command config");
@@ -779,6 +778,16 @@ fn mainImpl(init: std.process.Init) !u8 {
         expect(&ctx, std.mem.indexOf(u8, res_cfg.stdout, "\"kind\": \"other\"") != null, "config JSON carries kinds");
         expect(&ctx, std.mem.indexOf(u8, res_cfg.stdout, "\"mode\": \"command\"") != null, "config JSON carries rag mode");
         expect(&ctx, std.mem.indexOf(u8, res_cfg.stdout, "\"echo-it\"") != null, "config JSON lists named commands");
+
+        // 7. run --json (structured completion)
+        const res_run_ok = try fmrRun(&ctx, args, &.{ "run", "cmd-repo", "echo-it", "--json" }, &pr_env);
+        expectExit(&ctx, res_run_ok, 0, "run --json ok exits 0");
+        expect(&ctx, std.mem.indexOf(u8, res_run_ok.stdout, "\"command\": \"run\"") != null, "run JSON has command run");
+        expect(&ctx, std.mem.indexOf(u8, res_run_ok.stdout, "\"result\": \"ok\"") != null, "run JSON reports ok");
+
+        const res_run_fail = try fmrRun(&ctx, args, &.{ "run", "cmd-repo", "fail", "--json" }, &pr_env);
+        expectExit(&ctx, res_run_fail, 4, "run --json failing exits 4");
+        expect(&ctx, std.mem.indexOf(u8, res_run_fail.stdout, "\"result\": \"failed\"") != null, "run JSON reports failed");
     }
 
     pr.line(&ctx, .gray, "e2e tmp dir kept for inspection on failure: {s}", .{tmp});

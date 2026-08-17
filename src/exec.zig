@@ -116,6 +116,7 @@ pub fn runCmd(
     repo_name: []const u8,
     cmd_name: []const u8,
     extra_args: []const []const u8,
+    json_out: bool,
     pr: *const ui.Printer,
 ) u8 {
     _ = pr;
@@ -163,9 +164,58 @@ pub fn runCmd(
         .cwd = repo_path,
         .env = env_list.items,
     }) catch {
-        process.stderrLineNewline(ctx, "fmr: failed to spawn '{s}' for repo '{s}'", .{ cmd_name, repo_name });
+        if (json_out) {
+            const out = std.fmt.allocPrint(ctx.alloc,
+                \\{{
+                \\  "version": 1,
+                \\  "command": "run",
+                \\  "exit": 4,
+                \\  "repos": [
+                \\    {{
+                \\      "name": "{s}",
+                \\      "result": "failed",
+                \\      "exit": 4,
+                \\      "message": "failed to spawn '{s}'"
+                \\    }}
+                \\  ]
+                \\}}
+                \\
+            , .{ repo_name, cmd_name }) catch return 1;
+            std.Io.File.stdout().writeStreamingAll(ctx.io, out) catch {};
+        } else {
+            process.stderrLineNewline(ctx, "fmr: failed to spawn '{s}' for repo '{s}'", .{ cmd_name, repo_name });
+        }
         return 4;
     };
+
+    if (json_out) {
+        // Keep stdout clean JSON; forward captured subprocess output to stderr.
+        if (res.stdout.len > 0) std.Io.File.stderr().writeStreamingAll(ctx.io, res.stdout) catch {};
+        if (res.stderr.len > 0) std.Io.File.stderr().writeStreamingAll(ctx.io, res.stderr) catch {};
+        const code = res.exited() orelse 1;
+        const ok = res.ok();
+        const result_str: []const u8 = if (ok) "ok" else "failed";
+        const fmr_exit: u8 = if (ok) 0 else 4;
+        const msg = std.fmt.allocPrint(ctx.alloc, "command '{s}' exited {d}", .{ cmd_name, code }) catch "command failed";
+        const out = std.fmt.allocPrint(ctx.alloc,
+            \\{{
+            \\  "version": 1,
+            \\  "command": "run",
+            \\  "exit": {d},
+            \\  "repos": [
+            \\    {{
+            \\      "name": "{s}",
+            \\      "result": "{s}",
+            \\      "exit": {d},
+            \\      "message": "{s}"
+            \\    }}
+            \\  ]
+            \\}}
+            \\
+        , .{ fmr_exit, repo_name, result_str, fmr_exit, msg }) catch return 1;
+        std.Io.File.stdout().writeStreamingAll(ctx.io, out) catch {};
+        return fmr_exit;
+    }
 
     // Forward subprocess stdout/stderr to our own streams so the caller sees output.
     if (res.stdout.len > 0) std.Io.File.stdout().writeStreamingAll(ctx.io, res.stdout) catch {};
