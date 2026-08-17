@@ -34,6 +34,10 @@ pub fn main(init: std.process.Init) u8 {
     var fix = false;
     var gc_keep: ?usize = null;
     var json_out = false;
+    var add_kind: ?[]const u8 = null;
+    var add_branch: ?[]const u8 = null;
+    var sync_now = false;
+    var delete_files = false;
     var cmd: ?[]const u8 = null;
     var repo_args = ArrayList([]const u8).init(ctx.alloc);
 
@@ -59,6 +63,20 @@ pub fn main(init: std.process.Init) u8 {
             i += 1;
             if (i >= argv.items.len) return usage(&ctx, "missing count after --gc");
             gc_keep = std.fmt.parseInt(usize, argv.items[i], 10) catch return usage(&ctx, "--gc expects an integer");
+        } else if (std.mem.eql(u8, a, "--kind")) {
+            i += 1;
+            if (i >= argv.items.len) return usage(&ctx, "missing value after --kind");
+            add_kind = argv.items[i];
+        } else if (std.mem.eql(u8, a, "--branch")) {
+            i += 1;
+            if (i >= argv.items.len) return usage(&ctx, "missing value after --branch");
+            add_branch = argv.items[i];
+        } else if (std.mem.eql(u8, a, "--sync")) {
+            sync_now = true;
+        } else if (std.mem.eql(u8, a, "--no-sync")) {
+            sync_now = false;
+        } else if (std.mem.eql(u8, a, "--delete-files")) {
+            delete_files = true;
         } else if (std.mem.eql(u8, a, "--force") or std.mem.eql(u8, a, "-f")) {
             force = true;
         } else if (std.mem.eql(u8, a, "--fix")) {
@@ -151,6 +169,13 @@ pub fn main(init: std.process.Init) u8 {
         const run_cmd = repo_args.items[1];
         const run_extra = repo_args.items[2..];
         return exec.runCmd(&ctx, &cfg, run_repo, run_cmd, run_extra, json_out, &pr);
+    } else if (std.mem.eql(u8, c, "add")) {
+        if (repo_args.items.len < 1 or repo_args.items.len > 2) return usage(&ctx, "add requires <name> [<url>]");
+        const add_url: ?[]const u8 = if (repo_args.items.len > 1) repo_args.items[1] else null;
+        return addRepo(&ctx, &cfg, path, repo_args.items[0], add_url, add_kind, add_branch, sync_now, json_out);
+    } else if (std.mem.eql(u8, c, "remove")) {
+        if (repo_args.items.len < 1) return usage(&ctx, "remove requires <name>");
+        return removeRepo(&ctx, &cfg, path, repo_args.items[0], delete_files);
     } else if (std.mem.eql(u8, c, "rag")) {
         if (repo_args.items.len > 0) {
             if (unknownRepo(&ctx, &cfg, repo_args.items)) return 2;
@@ -165,6 +190,90 @@ pub fn main(init: std.process.Init) u8 {
     } else {
         return usage(&ctx, "unknown command");
     }
+}
+
+fn addRepo(
+    ctx: *const process.Ctx,
+    cfg: *const config.Config,
+    config_path: []const u8,
+    name: []const u8,
+    url: ?[]const u8,
+    kind_str: ?[]const u8,
+    branch: ?[]const u8,
+    sync_now: bool,
+    json_out: bool,
+) u8 {
+    var kind: ?config.Kind = null;
+    if (kind_str) |ks| {
+        kind = config.kindFromString(ks) orelse {
+            process.stderrLineNewline(ctx, "fmr: unknown kind '{s}' (expected zig, go, node, site, bash, other)", .{ks});
+            return 2;
+        };
+    } else {
+        // Auto-detect from an existing local folder at the primary path.
+        const primary = std.Io.Dir.path.join(ctx.alloc, &.{ cfg.paths.repos, name }) catch return 1;
+        kind = config.detectKindFromDir(ctx, primary);
+    }
+
+    config.addRepoToConfigFile(ctx, config_path, name, url, kind, branch) catch |err| switch (err) {
+        error.InvalidName => {
+            process.stderrLineNewline(ctx, "fmr: invalid repo name '{s}'", .{name});
+            return 2;
+        },
+        error.InvalidUrl => {
+            process.stderrLineNewline(ctx, "fmr: invalid url", .{});
+            return 2;
+        },
+        error.DuplicateRepo => {
+            process.stderrLineNewline(ctx, "fmr: repo '{s}' already exists in config", .{name});
+            return 2;
+        },
+        error.UnknownKind => return 2,
+        error.InvalidConfig => {
+            process.stderrLineNewline(ctx, "fmr: could not update config (exit 5)", .{});
+            return 5;
+        },
+        error.OutOfMemory => return 1,
+    };
+
+    process.stderrLineNewline(ctx, "[ok] added repo '{s}' to {s}", .{ name, config_path });
+
+    if (sync_now) {
+        var diag = config.Diag.init(ctx.alloc);
+        defer diag.deinit();
+        var new_cfg = config.load(ctx, config_path, &diag) catch {
+            process.stderrLineNewline(ctx, "fmr: config reload failed after add", .{});
+            return 5;
+        };
+        var names = ArrayList([]const u8).init(ctx.alloc);
+        names.append(name) catch return 1;
+        var pr = ui.Printer.initFromCtx(ctx);
+        return sync.run(ctx, &new_cfg, names.items, 1, json_out, &pr);
+    }
+    return 0;
+}
+
+fn removeRepo(ctx: *const process.Ctx, cfg: *const config.Config, config_path: []const u8, name: []const u8, delete_files: bool) u8 {
+    const removed = config.removeRepoFromConfigFile(ctx, config_path, name) catch {
+        process.stderrLineNewline(ctx, "fmr: could not update config (exit 5)", .{});
+        return 5;
+    };
+    if (!removed) {
+        process.stderrLineNewline(ctx, "fmr: repo '{s}' not found in config", .{name});
+        return 2;
+    }
+    process.stderrLineNewline(ctx, "[ok] removed repo '{s}' from {s}", .{ name, config_path });
+    if (delete_files) {
+        const primary = std.Io.Dir.path.join(ctx.alloc, &.{ cfg.paths.repos, name }) catch return 1;
+        if (std.Io.Dir.cwd().access(ctx.io, primary, .{})) |_| {
+            process.stderrLineNewline(ctx, "fmr: deleting checkout {s}", .{primary});
+            std.Io.Dir.cwd().deleteTree(ctx.io, primary) catch {
+                process.stderrLineNewline(ctx, "fmr: failed to delete {s}", .{primary});
+                return 1;
+            };
+        } else |_| {}
+    }
+    return 0;
 }
 
 fn defaultConfigPath(ctx: *const process.Ctx) !?[]u8 {
@@ -196,14 +305,14 @@ fn unknownRepo(ctx: *const process.Ctx, cfg: *const config.Config, names: []cons
 fn help(ctx: *const process.Ctx) u8 {
     process.stderrLineNewline(ctx, "fmr — Workspace Manager in Zig", .{});
     process.stderrLineNewline(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>] [--force] [--fix] [--gc <n>] [--json]", .{});
-    process.stderrLineNewline(ctx, "commands: status | sync | doctor | config | check | run | rag", .{});
+    process.stderrLineNewline(ctx, "commands: status | sync | doctor | config | check | run | rag | add | remove", .{});
     return 0;
 }
 
 fn usage(ctx: *const process.Ctx, reason: []const u8) u8 {
     if (reason.len > 0) process.stderrLineNewline(ctx, "fmr: {s}", .{reason});
     process.stderrLineNewline(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>] [--force] [--fix] [--gc <n>] [--json]", .{});
-    process.stderrLineNewline(ctx, "commands: status | sync | doctor | config | check | run | rag", .{});
+    process.stderrLineNewline(ctx, "commands: status | sync | doctor | config | check | run | rag | add | remove", .{});
     return 2;
 }
 

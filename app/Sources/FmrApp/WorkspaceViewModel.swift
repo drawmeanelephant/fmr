@@ -30,6 +30,7 @@ public final class WorkspaceViewModel: @unchecked Sendable {
     public var isDoctorSheetPresented: Bool = false
     public var isCreateWorktreePresented: Bool = false
     public var isCommandPalettePresented: Bool = false
+    public var isAddRepoPresented: Bool = false
 
     public var searchQuery: String = ""
     public var selectedFilter: RepoFilter = .all
@@ -158,7 +159,7 @@ public final class WorkspaceViewModel: @unchecked Sendable {
                     self.lastUpdated = Date()
                     self.isRefreshing = false
                     self.discoverWorktrees()
-                    if !self.catalogLoaded { self.loadCatalog() }
+                    self.loadCatalog()
                 }
             } catch {
                 await MainActor.run {
@@ -274,6 +275,100 @@ public final class WorkspaceViewModel: @unchecked Sendable {
                     self.lastTaskOutput.append("\nFailed to run: \(error.localizedDescription)\n")
                 }
             }
+        }
+    }
+
+    // MARK: - Repository Onboarding
+
+    /// Extract a repo name from a git remote URL.
+    /// `git@github.com:org/repo.git` -> `repo`; `https://github.com/org/repo.git` -> `repo`.
+    public static func nameFromURL(_ url: String) -> String? {
+        var s = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasSuffix(".git") { s = String(s.dropLast(4)) }
+        if let scheme = s.range(of: "://") { s = String(s[scheme.upperBound...]) }
+        if let at = s.lastIndex(of: "@"), s[at...].contains(":") {
+            s = String(s[s.index(after: at)...])
+        }
+        var rest = s
+        if let idx = s.firstIndex(where: { $0 == ":" || $0 == "/" }) {
+            rest = String(s[s.index(after: idx)...])
+        }
+        while rest.hasSuffix("/") { rest = String(rest.dropLast()) }
+        if let slash = rest.lastIndex(of: "/") { rest = String(rest[rest.index(after: slash)...]) }
+        return rest.isEmpty ? nil : rest
+    }
+
+    /// Detect a repo kind from a local directory by probing manifest files.
+    public static func detectKind(in directory: URL) -> String? {
+        let fm = FileManager.default
+        let probes: [(String, String)] = [
+            ("build.zig", "zig"),
+            ("go.mod", "go"),
+            ("package.json", "node"),
+            ("pyproject.toml", "other"),
+        ]
+        for (file, kind) in probes where fm.fileExists(atPath: directory.appendingPathComponent(file).path) {
+            return kind
+        }
+        return nil
+    }
+
+    /// Read the origin remote URL of a local git directory, if any.
+    public func remoteURL(forLocalDirectory url: URL) -> String? {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        proc.arguments = ["-C", url.path, "remote", "get-url", "origin"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = Pipe()
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let out = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (proc.terminationStatus == 0 && !(out ?? "").isEmpty) ? out : nil
+        } catch {
+            return nil
+        }
+    }
+
+    @MainActor
+    public func addRepository(name: String, url: String?, kind: String?, defaultBranch: String?, syncNow: Bool, ragNow: Bool) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return }
+
+        var args = ["add", trimmedName]
+        if let url, !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            args.append(url.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        if let kind, !kind.isEmpty { args += ["--kind", kind] }
+        if let defaultBranch, !defaultBranch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            args += ["--branch", defaultBranch.trimmingCharacters(in: .whitespacesAndNewlines)]
+        }
+        if syncNow { args.append("--sync") }
+
+        runTask(description: "Adding repository '\(trimmedName)'...") {
+            let res = try await self.bridge.execute(arguments: args)
+            guard res.exitCode == 0 else {
+                let msg = res.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                throw NSError(domain: "fmr", code: Int(res.exitCode), userInfo: [NSLocalizedDescriptionKey: msg.isEmpty ? "fmr add failed" : msg])
+            }
+            if ragNow {
+                let _: RagResponse? = try? await self.bridge.run(["rag", trimmedName])
+            }
+            return "Added repository '\(trimmedName)' to workspace."
+        }
+    }
+
+    @MainActor
+    public func removeRepository(name: String) {
+        runTask(description: "Removing repository '\(name)'...") {
+            let res = try await self.bridge.execute(arguments: ["remove", name])
+            guard res.exitCode == 0 else {
+                let msg = res.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                throw NSError(domain: "fmr", code: Int(res.exitCode), userInfo: [NSLocalizedDescriptionKey: msg.isEmpty ? "fmr remove failed" : msg])
+            }
+            return "Removed repository '\(name)' from workspace."
         }
     }
 

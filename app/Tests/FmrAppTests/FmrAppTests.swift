@@ -179,6 +179,48 @@ final class FmrAppTests: XCTestCase {
         XCTAssertNotNil(model.validateSessionName(".hidden"))
     }
 
+    func testNameFromURL() throws {
+        // ssh git@ style
+        XCTAssertEqual(WorkspaceViewModel.nameFromURL("git@github.com:org/my-repo.git"), "my-repo")
+        // https style
+        XCTAssertEqual(WorkspaceViewModel.nameFromURL("https://github.com/org/my-repo.git"), "my-repo")
+        // no .git suffix
+        XCTAssertEqual(WorkspaceViewModel.nameFromURL("git@github.com:org/my-repo"), "my-repo")
+        // trailing slash
+        XCTAssertEqual(WorkspaceViewModel.nameFromURL("https://github.com/org/my-repo/"), "my-repo")
+        // nested path
+        XCTAssertEqual(WorkspaceViewModel.nameFromURL("https://github.com/org/sub/dir/repo-name.git"), "repo-name")
+        // whitespace trimmed
+        XCTAssertEqual(WorkspaceViewModel.nameFromURL("  git@github.com:org/repo.git \n"), "repo")
+        // empty / degenerate
+        XCTAssertNil(WorkspaceViewModel.nameFromURL(""))
+        XCTAssertNil(WorkspaceViewModel.nameFromURL("   ")
+)
+    }
+
+    func testDetectKind() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        // no manifest -> nil
+        XCTAssertNil(WorkspaceViewModel.detectKind(in: tmp))
+
+        // build.zig -> zig
+        try Data().write(to: tmp.appendingPathComponent("build.zig"))
+        XCTAssertEqual(WorkspaceViewModel.detectKind(in: tmp), "zig")
+
+        // go.mod -> go
+        try FileManager.default.removeItem(at: tmp.appendingPathComponent("build.zig"))
+        try Data().write(to: tmp.appendingPathComponent("go.mod"))
+        XCTAssertEqual(WorkspaceViewModel.detectKind(in: tmp), "go")
+
+        // package.json -> node
+        try FileManager.default.removeItem(at: tmp.appendingPathComponent("go.mod"))
+        try Data().write(to: tmp.appendingPathComponent("package.json"))
+        XCTAssertEqual(WorkspaceViewModel.detectKind(in: tmp), "node")
+    }
+
     func testDecodeRagJson() throws {
         let json = """
         {

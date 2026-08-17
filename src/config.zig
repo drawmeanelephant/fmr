@@ -852,6 +852,151 @@ fn jsonStr(buf: *ArrayList(u8), s: []const u8) !void {
     try buf.append('"');
 }
 
+// ---------------------------------------------------------------------------
+// Repo lifecycle: fmr add / fmr remove
+// ---------------------------------------------------------------------------
+
+pub const AddError = error{
+    InvalidConfig,
+    DuplicateRepo,
+    InvalidName,
+    InvalidUrl,
+    UnknownKind,
+    OutOfMemory,
+};
+
+/// Derive a repo name from a git remote URL.
+/// `git@github.com:org/repo.git` -> `repo`; `https://github.com/org/repo` -> `repo`.
+pub fn nameFromUrl(url: []const u8, alloc: std.mem.Allocator) ?[]const u8 {
+    var s = url;
+    if (std.mem.endsWith(u8, s, ".git")) s = s[0 .. s.len - 4];
+    if (std.mem.indexOf(u8, s, "://")) |idx| s = s[idx + 3 ..];
+    // Strip a user@ prefix for scp-like syntax (git@host:path).
+    if (std.mem.lastIndexOf(u8, s, "@")) |at| {
+        if (std.mem.indexOf(u8, s[at..], ":")) |_| s = s[at + 1 ..];
+    }
+    // Strip the host: keep the path segment after ':' or '/', then the last '/'.
+    if (std.mem.indexOfAny(u8, s, ":/")) |idx| {
+        var rest = s[idx..];
+        if (rest.len > 0 and (rest[0] == ':' or rest[0] == '/')) rest = rest[1..];
+        if (std.mem.lastIndexOf(u8, rest, "/")) |slash| rest = rest[slash + 1 ..];
+        s = rest;
+    }
+    if (s.len == 0) return null;
+    return alloc.dupe(u8, s) catch null;
+}
+
+/// Detect a repo kind from an existing local directory by probing well-known
+/// manifest files. Returns null when nothing is recognized.
+pub fn detectKindFromDir(ctx: *const process.Ctx, dir: []const u8) ?Kind {
+    const probes = [_]struct { file: []const u8, kind: Kind }{
+        .{ .file = "build.zig", .kind = .zig },
+        .{ .file = "go.mod", .kind = .go },
+        .{ .file = "package.json", .kind = .node },
+        .{ .file = "pyproject.toml", .kind = .other },
+    };
+    for (probes) |p| {
+        const path = std.Io.Dir.path.join(ctx.alloc, &.{ dir, p.file }) catch continue;
+        if (std.Io.Dir.cwd().access(ctx.io, path, .{})) |_| {
+            return p.kind;
+        } else |_| {}
+    }
+    return null;
+}
+
+/// Append a repo entry to `workspace.json`, preserving existing structure and
+/// `_` comment keys. The file is re-serialized with 2-space indentation.
+pub fn addRepoToConfigFile(
+    ctx: *const process.Ctx,
+    config_path: []const u8,
+    name: []const u8,
+    url: ?[]const u8,
+    kind: ?Kind,
+    default_branch: ?[]const u8,
+) AddError!void {
+    const alloc = ctx.alloc;
+    if (!validRepoName(name)) return error.InvalidName;
+    if (url) |u| if (!validUrl(u)) return error.InvalidUrl;
+
+    const contents = std.Io.Dir.cwd().readFileAlloc(ctx.io, config_path, alloc, .limited(1 << 20)) catch return error.InvalidConfig;
+    defer alloc.free(contents);
+
+    var parsed = std.json.parseFromSlice(std.json.Value, alloc, contents, .{ .allocate = .alloc_always }) catch return error.InvalidConfig;
+    defer parsed.deinit();
+
+    if (parsed.value != .object) return error.InvalidConfig;
+    const root = &parsed.value.object;
+    const repos_ptr = root.getPtr("repos") orelse return error.InvalidConfig;
+    if (repos_ptr.* != .array) return error.InvalidConfig;
+    var repos = &repos_ptr.*.array;
+
+    for (repos.items) |item| {
+        if (item == .object) {
+            if (item.object.get("name")) |nv| {
+                if (nv == .string and std.mem.eql(u8, nv.string, name)) return error.DuplicateRepo;
+            }
+        }
+    }
+
+    var repo = std.json.ObjectMap.empty;
+    try repo.put(alloc, "name", .{ .string = name });
+    if (url) |u| try repo.put(alloc, "url", .{ .string = u });
+    if (kind) |k| try repo.put(alloc, "kind", .{ .string = @tagName(k) });
+    if (default_branch) |b| try repo.put(alloc, "default_branch", .{ .string = b });
+    try repos.append(.{ .object = repo });
+
+    try writeJsonFile(ctx, config_path, parsed.value);
+}
+
+/// Remove a repo entry from `workspace.json`. Returns true if it was found and
+/// removed, false if no such repo existed.
+pub fn removeRepoFromConfigFile(ctx: *const process.Ctx, config_path: []const u8, name: []const u8) AddError!bool {
+    const alloc = ctx.alloc;
+    const contents = std.Io.Dir.cwd().readFileAlloc(ctx.io, config_path, alloc, .limited(1 << 20)) catch return error.InvalidConfig;
+    defer alloc.free(contents);
+
+    var parsed = std.json.parseFromSlice(std.json.Value, alloc, contents, .{ .allocate = .alloc_always }) catch return error.InvalidConfig;
+    defer parsed.deinit();
+
+    if (parsed.value != .object) return error.InvalidConfig;
+    const root = &parsed.value.object;
+    const repos_ptr = root.getPtr("repos") orelse return error.InvalidConfig;
+    if (repos_ptr.* != .array) return error.InvalidConfig;
+    var repos = &repos_ptr.*.array;
+
+    var found = false;
+    var i: usize = 0;
+    while (i < repos.items.len) {
+        const item = repos.items[i];
+        var matches = false;
+        if (item == .object) {
+            if (item.object.get("name")) |nv| {
+                if (nv == .string and std.mem.eql(u8, nv.string, name)) matches = true;
+            }
+        }
+        if (matches) {
+            _ = repos.orderedRemove(i);
+            found = true;
+        } else {
+            i += 1;
+        }
+    }
+    if (!found) return false;
+
+    try writeJsonFile(ctx, config_path, parsed.value);
+    return true;
+}
+
+fn writeJsonFile(ctx: *const process.Ctx, config_path: []const u8, value: std.json.Value) AddError!void {
+    const alloc = ctx.alloc;
+    const serialized = std.json.Stringify.valueAlloc(alloc, value, .{ .whitespace = .indent_2 }) catch return error.OutOfMemory;
+    defer alloc.free(serialized);
+    var buf = ArrayList(u8).init(alloc);
+    buf.appendSlice(serialized) catch return error.OutOfMemory;
+    buf.append('\n') catch return error.OutOfMemory;
+    std.Io.Dir.cwd().writeFile(ctx.io, .{ .sub_path = config_path, .data = buf.items }) catch return error.InvalidConfig;
+}
+
 fn appendJsonArray(buf: *ArrayList(u8), items: []const []const u8) !void {
     try buf.append('[');
     for (items, 0..) |it, i| {
