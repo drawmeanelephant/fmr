@@ -86,6 +86,37 @@ public struct CommandPaletteView: View {
                         }
                     }
                 }
+
+                if !filteredRecents.isEmpty {
+                    Section("Recent Repositories (\(filteredRecents.count))") {
+                        ForEach(filteredRecents) { entry in
+                            Button {
+                                model.cloneAndOpenRecent(entry)
+                                dismiss()
+                            } label: {
+                                HStack {
+                                    Image(systemName: "clock.arrow.circlepath")
+                                        .foregroundStyle(.secondary)
+                                    Text(entry.name)
+                                        .font(.headline)
+                                    if let kind = entry.kind, !kind.isEmpty {
+                                        Text(kind)
+                                            .font(.caption2)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 1)
+                                            .background(Color.blue.opacity(0.12))
+                                            .foregroundStyle(.blue)
+                                            .clipShape(Capsule())
+                                    }
+                                    Spacer()
+                                    Label("Clone & Open", systemImage: "arrow.up.right.square.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
             }
             .listStyle(.inset)
         }
@@ -97,6 +128,16 @@ public struct CommandPaletteView: View {
         return model.repos.filter {
             $0.name.localizedCaseInsensitiveContains(query) ||
             $0.branch.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    /// Recent repos matching the query (falls back to all recents when empty).
+    private var filteredRecents: [RecentRepoEntry] {
+        if query.isEmpty { return model.recentRepos }
+        return model.recentRepos.filter {
+            $0.name.localizedCaseInsensitiveContains(query) ||
+            ($0.kind ?? "").localizedCaseInsensitiveContains(query) ||
+            ($0.url ?? "").localizedCaseInsensitiveContains(query)
         }
     }
 }
