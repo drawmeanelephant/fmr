@@ -2,7 +2,7 @@ import XCTest
 @testable import FmrApp
 
 final class FmrAppTests: XCTestCase {
-    func testDecodeStatusJson() throws {
+    func testDecodeStatusJsonWithExtendedFields() throws {
         let json = """
         {
           "version": 1,
@@ -20,7 +20,10 @@ final class FmrAppTests: XCTestCase {
               "dirty_tracked": 1,
               "untracked": 3,
               "snap": "ok",
-              "sessions": 2
+              "sessions": 2,
+              "kind": "zig",
+              "path": "/Users/t/dev/drawmeanelephant/boris",
+              "url": "git@github.com:drawmeanelephant/boris.git"
             }
           ]
         }
@@ -35,6 +38,9 @@ final class FmrAppTests: XCTestCase {
         XCTAssertEqual(r.name, "boris")
         XCTAssertEqual(r.branch, "afterparty")
         XCTAssertEqual(r.head, "1234567")
+        XCTAssertEqual(r.kind, "zig")
+        XCTAssertEqual(r.path, "/Users/t/dev/drawmeanelephant/boris")
+        XCTAssertEqual(r.url, "git@github.com:drawmeanelephant/boris.git")
         XCTAssertTrue(r.isDirty)
         XCTAssertTrue(r.isBehind)
         XCTAssertFalse(r.isClean)
@@ -42,7 +48,7 @@ final class FmrAppTests: XCTestCase {
         XCTAssertEqual(r.sessions, 2)
     }
 
-    func testDecodeSyncJson() throws {
+    func testDecodeSyncJsonWithDiffMetadata() throws {
         let json = """
         {
           "version": 1,
@@ -53,7 +59,10 @@ final class FmrAppTests: XCTestCase {
               "name": "boris",
               "result": "ok",
               "exit": 0,
-              "message": "up to date"
+              "message": "fast-forward",
+              "before": "1234abc",
+              "after": "5678def",
+              "action": "fast-forward"
             }
           ],
           "summary": {
@@ -68,6 +77,9 @@ final class FmrAppTests: XCTestCase {
         let response = try JSONDecoder().decode(SyncResponse.self, from: json)
         XCTAssertEqual(response.repos.count, 1)
         XCTAssertEqual(response.summary.ok, 1)
+        XCTAssertEqual(response.repos[0].before, "1234abc")
+        XCTAssertEqual(response.repos[0].after, "5678def")
+        XCTAssertEqual(response.repos[0].action, "fast-forward")
     }
 
     func testDecodeDoctorJson() throws {

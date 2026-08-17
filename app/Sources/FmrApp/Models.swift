@@ -23,6 +23,11 @@ public struct RepoStatus: Codable, Identifiable, Hashable, Sendable {
     public let snap: String
     public let sessions: Int
 
+    // Extended optional fields from upcoming core CLI updates
+    public let kind: String?
+    public let path: String?
+    public let url: String?
+
     enum CodingKeys: String, CodingKey {
         case name
         case branch
@@ -35,6 +40,9 @@ public struct RepoStatus: Codable, Identifiable, Hashable, Sendable {
         case untracked
         case snap
         case sessions
+        case kind
+        case path
+        case url
     }
 
     public var isClean: Bool {
@@ -60,6 +68,11 @@ public struct RepoStatus: Codable, Identifiable, Hashable, Sendable {
     public var isSnapStale: Bool {
         return snap == "stale"
     }
+
+    public var resolvedPath: String {
+        if let p = path, !p.isEmpty { return p }
+        return "\(NSHomeDirectory())/dev/drawmeanelephant/\(name)"
+    }
 }
 
 // MARK: - Sync Models
@@ -78,6 +91,9 @@ public struct SyncOutcome: Codable, Identifiable, Sendable {
     public let result: String
     public let exit: Int
     public let message: String
+    public let before: String?
+    public let after: String?
+    public let action: String?
 }
 
 public struct SyncSummary: Codable, Sendable {
@@ -144,6 +160,37 @@ public struct RagOutcome: Codable, Identifiable, Sendable {
     public let message: String
 }
 
+// MARK: - Config Models
+
+public struct ConfigResponse: Codable, Sendable {
+    public let version: Int?
+    public let paths: ConfigPaths?
+    public let repos: [ConfigRepoItem]?
+}
+
+public struct ConfigPaths: Codable, Sendable {
+    public let repos: String
+    public let worktrees: String
+    public let sourceRag: String
+}
+
+public struct ConfigRepoItem: Codable, Identifiable, Sendable {
+    public var id: String { name }
+    public let name: String
+    public let url: String?
+    public let kind: String?
+    public let defaultBranch: String?
+    public let worktreeSafe: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case url
+        case kind
+        case defaultBranch = "default_branch"
+        case worktreeSafe = "worktree_safe"
+    }
+}
+
 // MARK: - Session / Worktree Model
 
 public struct WorktreeSession: Identifiable, Hashable, Sendable {
@@ -151,5 +198,42 @@ public struct WorktreeSession: Identifiable, Hashable, Sendable {
     public let repoName: String
     public let sessionName: String
     public let path: String
-    public let branch: String?
+    public var branch: String?
+    public var headSha: String?
+}
+
+public enum CodeEditor: String, CaseIterable, Identifiable, Sendable {
+    case cursor = "Cursor"
+    case vscode = "VS Code"
+    case zed = "Zed"
+    case xcode = "Xcode"
+    case sublime = "Sublime Text"
+    case terminal = "Terminal"
+    case finder = "Finder"
+
+    public var id: String { rawValue }
+
+    public var iconName: String {
+        switch self {
+        case .cursor: return "chevron.left.forwardslash.chevron.right"
+        case .vscode: return "curlybraces"
+        case .zed: return "bolt.fill"
+        case .xcode: return "hammer.fill"
+        case .sublime: return "doc.text.fill"
+        case .terminal: return "terminal.fill"
+        case .finder: return "folder.fill"
+        }
+    }
+
+    public var bundleIdentifier: String? {
+        switch self {
+        case .cursor: return "com.todesktop.230313mzl4w4u92"
+        case .vscode: return "com.microsoft.VSCode"
+        case .zed: return "dev.zed.Zed"
+        case .xcode: return "com.apple.dt.Xcode"
+        case .sublime: return "com.sublimetext.4"
+        case .terminal: return "com.apple.Terminal"
+        case .finder: return "com.apple.finder"
+        }
+    }
 }
