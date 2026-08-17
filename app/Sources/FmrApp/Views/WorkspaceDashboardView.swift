@@ -111,6 +111,7 @@ public struct WorkspaceDashboardView: View {
                 .keyboardShortcut("n", modifiers: .command)
 
                 Button {
+                    model.paletteFilter = .all
                     model.isCommandPalettePresented = true
                 } label: {
                     Image(systemName: "command")

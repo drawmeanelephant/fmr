@@ -2,6 +2,12 @@ import Foundation
 import SwiftUI
 import AppKit
 
+/// What the command palette should focus on when opened.
+public enum PaletteFilter: Sendable {
+    case all
+    case recents
+}
+
 public enum RepoFilter: String, CaseIterable, Identifiable, Sendable {
     case all = "All"
     case dirty = "Needs Attention"
@@ -31,6 +37,9 @@ public final class WorkspaceViewModel: @unchecked Sendable {
     public var isCreateWorktreePresented: Bool = false
     public var isCommandPalettePresented: Bool = false
     public var isAddRepoPresented: Bool = false
+
+    /// Which section the command palette should lead with when opened.
+    public var paletteFilter: PaletteFilter = .all
 
     public var searchQuery: String = ""
     public var selectedFilter: RepoFilter = .all

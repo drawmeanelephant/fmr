@@ -42,6 +42,7 @@ struct FmrApp: App {
                 Divider()
 
                 Button("Clone & Open Recent Repository...") {
+                    model.paletteFilter = .recents
                     model.isCommandPalettePresented = true
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])

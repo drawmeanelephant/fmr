@@ -4,9 +4,12 @@ public struct CommandPaletteView: View {
     @Bindable var model: WorkspaceViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var query: String = ""
+    @State private var recentsOnly: Bool
 
     public init(model: WorkspaceViewModel) {
         self.model = model
+        // Cmd+Shift+O opens the palette focused on recent repositories.
+        self._recentsOnly = State(initialValue: model.paletteFilter == .recents)
     }
 
     public var body: some View {
@@ -36,83 +39,79 @@ public struct CommandPaletteView: View {
 
             // Results List
             List {
-                Section("Quick Actions") {
-                    Button {
-                        model.syncAll()
-                        dismiss()
-                    } label: {
-                        Label("Sync All Repositories", systemImage: "arrow.triangle.2.circlepath")
-                    }
-
-                    Button {
-                        model.ragAll()
-                        dismiss()
-                    } label: {
-                        Label("Generate RAG Snapshots for All", systemImage: "camera")
-                    }
-
-                    Button {
-                        model.runDoctor(fix: false)
-                        dismiss()
-                    } label: {
-                        Label("Run Doctor Diagnostics", systemImage: "stethoscope")
-                    }
-
-                    Button {
-                        model.runDoctor(fix: true)
-                        dismiss()
-                    } label: {
-                        Label("Fix Stale Locks & Staging Directories", systemImage: "wrench.and.screwdriver")
-                    }
-                }
-
-                Section("Repositories (\(filteredList.count))") {
-                    ForEach(filteredList) { repo in
-                        Button {
-                            model.selectedRepo = repo
-                            dismiss()
-                        } label: {
-                            HStack {
-                                Circle()
-                                    .fill(repo.isClean ? Color.green : (repo.isDirty ? Color.orange : Color.yellow))
-                                    .frame(width: 8, height: 8)
-                                Text(repo.name)
-                                    .font(.headline)
-                                Spacer()
-                                Text(repo.branch)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                if recentsOnly {
+                    if !filteredRecents.isEmpty {
+                        Section("Recent Repositories (\(filteredRecents.count))") {
+                            ForEach(filteredRecents) { entry in
+                                recentRow(entry)
                             }
                         }
                     }
-                }
 
-                if !filteredRecents.isEmpty {
-                    Section("Recent Repositories (\(filteredRecents.count))") {
-                        ForEach(filteredRecents) { entry in
+                    Section {
+                        Button {
+                            recentsOnly = false
+                            query = ""
+                        } label: {
+                            Label("Show All Repositories", systemImage: "list.bullet")
+                        }
+                    }
+                } else {
+                    Section("Quick Actions") {
+                        Button {
+                            model.syncAll()
+                            dismiss()
+                        } label: {
+                            Label("Sync All Repositories", systemImage: "arrow.triangle.2.circlepath")
+                        }
+
+                        Button {
+                            model.ragAll()
+                            dismiss()
+                        } label: {
+                            Label("Generate RAG Snapshots for All", systemImage: "camera")
+                        }
+
+                        Button {
+                            model.runDoctor(fix: false)
+                        dismiss()
+                        } label: {
+                            Label("Run Doctor Diagnostics", systemImage: "stethoscope")
+                        }
+
+                        Button {
+                            model.runDoctor(fix: true)
+                            dismiss()
+                        } label: {
+                            Label("Fix Stale Locks & Staging Directories", systemImage: "wrench.and.screwdriver")
+                        }
+                    }
+
+                    Section("Repositories (\(filteredList.count))") {
+                        ForEach(filteredList) { repo in
                             Button {
-                                model.cloneAndOpenRecent(entry)
+                                model.selectedRepo = repo
                                 dismiss()
                             } label: {
                                 HStack {
-                                    Image(systemName: "clock.arrow.circlepath")
-                                        .foregroundStyle(.secondary)
-                                    Text(entry.name)
+                                    Circle()
+                                        .fill(repo.isClean ? Color.green : (repo.isDirty ? Color.orange : Color.yellow))
+                                        .frame(width: 8, height: 8)
+                                    Text(repo.name)
                                         .font(.headline)
-                                    if let kind = entry.kind, !kind.isEmpty {
-                                        Text(kind)
-                                            .font(.caption2)
-                                            .padding(.horizontal, 5)
-                                            .padding(.vertical, 1)
-                                            .background(Color.blue.opacity(0.12))
-                                            .foregroundStyle(.blue)
-                                            .clipShape(Capsule())
-                                    }
                                     Spacer()
-                                    Label("Clone & Open", systemImage: "arrow.up.right.square.fill")
+                                    Text(repo.branch)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
+                            }
+                        }
+                    }
+
+                    if !filteredRecents.isEmpty {
+                        Section("Recent Repositories (\(filteredRecents.count))") {
+                            ForEach(filteredRecents) { entry in
+                                recentRow(entry)
                             }
                         }
                     }
@@ -138,6 +137,33 @@ public struct CommandPaletteView: View {
             $0.name.localizedCaseInsensitiveContains(query) ||
             ($0.kind ?? "").localizedCaseInsensitiveContains(query) ||
             ($0.url ?? "").localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private func recentRow(_ entry: RecentRepoEntry) -> some View {
+        Button {
+            model.cloneAndOpenRecent(entry)
+            dismiss()
+        } label: {
+            HStack {
+                Image(systemName: "clock.arrow.circlepath")
+                    .foregroundStyle(.secondary)
+                Text(entry.name)
+                    .font(.headline)
+                if let kind = entry.kind, !kind.isEmpty {
+                    Text(kind)
+                        .font(.caption2)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.blue.opacity(0.12))
+                        .foregroundStyle(.blue)
+                        .clipShape(Capsule())
+                }
+                Spacer()
+                Label("Clone & Open", systemImage: "arrow.up.right.square.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }
