@@ -406,21 +406,9 @@ struct RepoDetailView: View {
                             }
                             .buttonStyle(.bordered)
 
-                            if repo.name == "boris" {
-                                Button("Serve (`fmr run boris serve`)") {
-                                    model.runCustomCommand(repoName: "boris", commandName: "serve")
-                                }
-                                .buttonStyle(.bordered)
-
-                                Button("Site Build (`fmr run boris site`)") {
-                                    model.runCustomCommand(repoName: "boris", commandName: "site")
-                                }
-                                .buttonStyle(.bordered)
-                            }
-
-                            if repo.name == "rotkeeper" {
-                                Button("Init (`fmr run rotkeeper init`)") {
-                                    model.runCustomCommand(repoName: "rotkeeper", commandName: "init")
+                            ForEach(model.customCommands(for: repo.name), id: \.0) { command, _ in
+                                Button(command.localizedCapitalized) {
+                                    model.runCustomCommand(repoName: repo.name, commandName: command)
                                 }
                                 .buttonStyle(.bordered)
                             }
