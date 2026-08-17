@@ -38,6 +38,13 @@ struct FmrApp: App {
                     model.runDoctor(fix: false)
                 }
                 .keyboardShortcut("d", modifiers: .command)
+
+                Divider()
+
+                Button("Clone & Open Recent Repository...") {
+                    model.isCommandPalettePresented = true
+                }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
             }
         }
     }
