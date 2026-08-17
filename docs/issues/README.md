@@ -30,6 +30,21 @@ Each issue is formatted with clear **Context**, **CLI Signatures**, **Architectu
 | **#13** | GUI-5 | Worktree Operations, Editor Launchers, & Extended Models | [`issue-09-gui-5-worktree-management-and-extended-models.md`](./issue-09-gui-5-worktree-management-and-extended-models.md) | Closed (PR #14) |
 | **#15** | GUI-6 | Repository Onboarding: `fmr add`, Native GUI Import Sheet & Drag-and-Drop | [`issue-10-repo-management-and-import.md`](./issue-10-repo-management-and-import.md) | Ready |
 
+---
+
+## Backlog (reviewed, not yet started)
+
+| Issue | Area | Title | Spec Document |
+|---|---|---|---|
+| **#16** | Core CLI | `fmr run --json` structured completion | [`issue-16-fmr-run-json.md`](./issue-16-fmr-run-json.md) |
+| **#17** | GUI | Wire `fmr config --json` into the app (kind filters, custom commands, paths) | [`issue-17-gui-config-catalog.md`](./issue-17-gui-config-catalog.md) |
+| **#18** | CI | Build & test the Swift app in GitHub Actions | [`issue-18-ci-swift-app.md`](./issue-18-ci-swift-app.md) |
+| **#19** | Packaging | `build_app.sh` LSUIElement, codesigning, & versioning | [`issue-19-gui-packaging-polish.md`](./issue-19-gui-packaging-polish.md) |
+| **#20** | GUI | Harden worktree create/remove edge cases | [`issue-20-gui-worktree-hardening.md`](./issue-20-gui-worktree-hardening.md) |
+| **#21** | Docs | Consolidate GUI docs & fix stale references | [`issue-21-docs-consolidation.md`](./issue-21-docs-consolidation.md) |
+
+> The authoritative `--json` contract lives in [`docs/gui/json-contract.md`](../gui/json-contract.md) —
+> issue specs point there rather than re-specifying field shapes.
 
 ---
 

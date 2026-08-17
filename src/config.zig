@@ -730,3 +730,133 @@ test "parse full 13 repo production catalog example" {
     try std.testing.expect(know.check != null);
     try std.testing.expectEqualStrings("go", know.check.?[0]);
 }
+
+// ---------------------------------------------------------------------------
+// Catalog JSON emission (fmr config --json)
+// ---------------------------------------------------------------------------
+
+/// Emit the parsed workspace catalog as structured JSON (`fmr config --json`).
+/// Lets GUI clients render repo kinds, configured commands, and rag modes
+/// without re-parsing workspace.json. Output is additive and stable across
+/// releases.
+pub fn writeCatalogJson(ctx: *const process.Ctx, cfg: *const Config) u8 {
+    const alloc = ctx.alloc;
+    var buf = ArrayList(u8).init(alloc);
+
+    buf.appendSlice("{\n  \"version\": 1,\n  \"command\": \"config\",\n  \"exit\": 0,\n") catch return 1;
+    buf.appendSlice("  \"paths\": {\n") catch return 1;
+    buf.appendSlice("    \"repos\": ") catch return 1;
+    jsonStr(&buf, cfg.paths.repos) catch return 1;
+    buf.appendSlice(",\n    \"worktrees\": ") catch return 1;
+    jsonStr(&buf, cfg.paths.worktrees) catch return 1;
+    buf.appendSlice(",\n    \"sourceRag\": ") catch return 1;
+    jsonStr(&buf, cfg.paths.source_rag) catch return 1;
+    buf.appendSlice("\n  },\n") catch return 1;
+    const par = std.fmt.allocPrint(alloc, "  \"parallelism\": {{\"sync\": {d}, \"status\": {d}, \"check\": {d}, \"rag\": {d}}},\n", .{
+        cfg.parallelism.sync,
+        cfg.parallelism.status,
+        cfg.parallelism.check,
+        cfg.parallelism.rag,
+    }) catch return 1;
+    buf.appendSlice(par) catch return 1;
+    buf.appendSlice("  \"repos\": [\n") catch return 1;
+
+    for (cfg.repos, 0..) |*r, i| {
+        buf.appendSlice("    {\n") catch return 1;
+        buf.appendSlice("      \"name\": ") catch return 1;
+        jsonStr(&buf, r.name) catch return 1;
+        buf.appendSlice(",\n      \"url\": ") catch return 1;
+        if (r.url) |u| jsonStr(&buf, u) catch return 1 else buf.appendSlice("null") catch return 1;
+        buf.appendSlice(",\n      \"kind\": ") catch return 1;
+        jsonStr(&buf, @tagName(r.kind)) catch return 1;
+        buf.appendSlice(",\n      \"path\": ") catch return 1;
+        const repo_path = std.Io.Dir.path.join(alloc, &.{ cfg.paths.repos, r.name }) catch return 1;
+        jsonStr(&buf, repo_path) catch return 1;
+        buf.appendSlice(",\n      \"default_branch\": ") catch return 1;
+        if (r.default_branch) |b| jsonStr(&buf, b) catch return 1 else buf.appendSlice("null") catch return 1;
+        buf.appendSlice(",\n      \"worktree_safe\": ") catch return 1;
+        buf.appendSlice(if (r.worktree_safe) "true" else "false") catch return 1;
+        buf.appendSlice(",\n      \"sync_enabled\": ") catch return 1;
+        buf.appendSlice(if (r.sync_enabled) "true" else "false") catch return 1;
+
+        buf.appendSlice(",\n      \"check\": ") catch return 1;
+        if (r.check) |argv| {
+            appendJsonArray(&buf, argv) catch return 1;
+        } else {
+            buf.appendSlice("null") catch return 1;
+        }
+
+        buf.appendSlice(",\n      \"rag\": ") catch return 1;
+        if (r.rag) |*rag| {
+            switch (rag.*) {
+                .command => |c| {
+                    buf.appendSlice("{\"mode\": \"command\", \"argv\": ") catch return 1;
+                    appendJsonArray(&buf, c.argv) catch return 1;
+                    buf.appendSlice(", \"output\": ") catch return 1;
+                    if (c.output) |o| jsonStr(&buf, o) catch return 1 else buf.appendSlice("null") catch return 1;
+                    buf.appendSlice("}") catch return 1;
+                },
+                .files => |f| {
+                    buf.appendSlice("{\"mode\": \"files\", \"globs\": ") catch return 1;
+                    appendJsonArray(&buf, f.globs) catch return 1;
+                    buf.appendSlice(", \"max_depth\": ") catch return 1;
+                    if (f.max_depth) |md| {
+                        const depth = std.fmt.allocPrint(alloc, "{d}", .{md}) catch return 1;
+                        buf.appendSlice(depth) catch return 1;
+                    } else {
+                        buf.appendSlice("null") catch return 1;
+                    }
+                    buf.appendSlice("}") catch return 1;
+                },
+            }
+        } else {
+            buf.appendSlice("null") catch return 1;
+        }
+
+        buf.appendSlice(",\n      \"env\": ") catch return 1;
+        appendJsonArray(&buf, r.env) catch return 1;
+
+        buf.appendSlice(",\n      \"commands\": {") catch return 1;
+        for (r.cmd_names, 0..) |cn, ci| {
+            if (ci > 0) buf.appendSlice(",") catch return 1;
+            buf.appendSlice("\n        ") catch return 1;
+            jsonStr(&buf, cn) catch return 1;
+            buf.appendSlice(": ") catch return 1;
+            appendJsonArray(&buf, r.cmd_argv[ci]) catch return 1;
+        }
+        if (r.cmd_names.len > 0) buf.appendSlice("\n      ") catch return 1;
+        buf.appendSlice("}") catch return 1;
+
+        buf.appendSlice("\n    }") catch return 1;
+        if (i + 1 < cfg.repos.len) buf.appendSlice(",") catch return 1;
+        buf.appendSlice("\n") catch return 1;
+    }
+    buf.appendSlice("  ]\n}\n") catch return 1;
+
+    std.Io.File.stdout().writeStreamingAll(ctx.io, buf.items) catch {};
+    return 0;
+}
+
+fn jsonStr(buf: *ArrayList(u8), s: []const u8) !void {
+    try buf.append('"');
+    for (s) |ch| {
+        switch (ch) {
+            '"' => try buf.appendSlice("\\\""),
+            '\\' => try buf.appendSlice("\\\\"),
+            '\n' => try buf.appendSlice("\\n"),
+            '\t' => try buf.appendSlice("\\t"),
+            '\r' => try buf.appendSlice("\\r"),
+            else => try buf.append(ch),
+        }
+    }
+    try buf.append('"');
+}
+
+fn appendJsonArray(buf: *ArrayList(u8), items: []const []const u8) !void {
+    try buf.append('[');
+    for (items, 0..) |it, i| {
+        if (i > 0) try buf.appendSlice(", ");
+        try jsonStr(buf, it);
+    }
+    try buf.append(']');
+}

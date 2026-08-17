@@ -123,6 +123,9 @@ pub fn main(init: std.process.Init) u8 {
     } else if (std.mem.eql(u8, c, "doctor")) {
         if (repo_args.items.len > 0) return usage(&ctx, "doctor takes no repo arguments");
         return doctor.run(&ctx, &cfg, fix, json_out, &pr);
+    } else if (std.mem.eql(u8, c, "config")) {
+        if (repo_args.items.len > 0) return usage(&ctx, "config takes no repo arguments");
+        return config.writeCatalogJson(&ctx, &cfg);
     } else if (std.mem.eql(u8, c, "check")) {
         if (repo_args.items.len > 0) {
             if (unknownRepo(&ctx, &cfg, repo_args.items)) return 2;
@@ -185,14 +188,14 @@ fn unknownRepo(ctx: *const process.Ctx, cfg: *const config.Config, names: []cons
 fn help(ctx: *const process.Ctx) u8 {
     process.stderrLineNewline(ctx, "fmr — Workspace Manager in Zig", .{});
     process.stderrLineNewline(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>] [--force] [--fix] [--gc <n>] [--json]", .{});
-    process.stderrLineNewline(ctx, "commands: status | sync | doctor | check | run | rag", .{});
+    process.stderrLineNewline(ctx, "commands: status | sync | doctor | config | check | run | rag", .{});
     return 0;
 }
 
 fn usage(ctx: *const process.Ctx, reason: []const u8) u8 {
     if (reason.len > 0) process.stderrLineNewline(ctx, "fmr: {s}", .{reason});
     process.stderrLineNewline(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>] [--force] [--fix] [--gc <n>] [--json]", .{});
-    process.stderrLineNewline(ctx, "commands: status | sync | doctor | check | run | rag", .{});
+    process.stderrLineNewline(ctx, "commands: status | sync | doctor | config | check | run | rag", .{});
     return 2;
 }
 
