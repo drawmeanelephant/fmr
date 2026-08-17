@@ -1,8 +1,11 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 public struct WorkspaceDashboardView: View {
     @Bindable var model: WorkspaceViewModel
+    @State private var pendingRemoveRepo: RepoStatus? = nil
+    @State private var pendingAddDirectory: URL? = nil
 
     public init(model: WorkspaceViewModel) {
         self.model = model
@@ -42,12 +45,18 @@ public struct WorkspaceDashboardView: View {
                                     Button("Open in Zed") { model.openIn(editor: .zed, path: repo.resolvedPath) }
                                     Button("Open in Terminal") { model.openIn(editor: .terminal, path: repo.resolvedPath) }
                                     Button("Reveal in Finder") { model.openIn(editor: .finder, path: repo.resolvedPath) }
+                                    Divider()
+                                    Button("Remove Repository...", role: .destructive) {
+                                        pendingRemoveRepo = repo
+                                    }
                                 }
                         }
                     }
                 }
                 .searchable(text: $model.searchQuery, placement: .sidebar, prompt: "Search repos & branches...")
-
+                .onDrop(of: [UTType.fileURL], isTargeted: nil) { providers in
+                    handleDrop(providers)
+                }
                 Divider()
 
                 // Sidebar Footer: Sync All + Doctor
@@ -94,6 +103,14 @@ public struct WorkspaceDashboardView: View {
                 }
 
                 Button {
+                    model.isAddRepoPresented = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .help("Add Repository (Cmd+N)")
+                .keyboardShortcut("n", modifiers: .command)
+
+                Button {
                     model.isCommandPalettePresented = true
                 } label: {
                     Image(systemName: "command")
@@ -134,6 +151,48 @@ public struct WorkspaceDashboardView: View {
         .sheet(isPresented: $model.isCommandPalettePresented) {
             CommandPaletteView(model: model)
         }
+        .sheet(isPresented: $model.isAddRepoPresented) {
+            AddRepoSheet(model: model, initialDirectory: pendingAddDirectory)
+        }
+        .confirmationDialog(
+            "Remove repository '\(pendingRemoveRepo?.name ?? "")' from the workspace?",
+            isPresented: Binding(
+                get: { pendingRemoveRepo != nil },
+                set: { if !$0 { pendingRemoveRepo = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let repo = pendingRemoveRepo {
+                    model.removeRepository(name: repo.name)
+                }
+                pendingRemoveRepo = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingRemoveRepo = nil
+            }
+        } message: {
+            Text("This removes '\(pendingRemoveRepo?.name ?? "")' from workspace.json. The repository folder on disk is left untouched.")
+        }
+    }
+
+    /// Handles dropping a folder (or git URL file) onto the sidebar to onboard it.
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+            let url: URL? = if let data = item as? Data, let s = String(data: data, encoding: .utf8) {
+                URL(fileURLWithPath: s)
+            } else if let u = item as? URL {
+                u
+            } else { nil }
+            if let url {
+                DispatchQueue.main.async {
+                    pendingAddDirectory = url
+                    model.isAddRepoPresented = true
+                }
+            }
+        }
+        return true
     }
 }
 

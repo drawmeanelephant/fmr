@@ -798,6 +798,47 @@ fn mainImpl(init: std.process.Init) !u8 {
         expect(&ctx, std.mem.indexOf(u8, res.stdout, "fmr ") != null, "--version prints fmr prefix");
     }
 
+    current = "add appends repo to config and sync clones it";
+    {
+        const args = base_args.items;
+        const new_repo = "imported";
+        const new_url = try std.Io.Dir.path.join(ctx.alloc, &.{ origins, "alpha.git" });
+
+        const res = try fmrRun(&ctx, args, &.{ "add", new_repo, new_url, "--kind", "zig", "--sync" }, &pr_env);
+        expectExit(&ctx, res, 0, "add --sync exits 0");
+
+        const cfg_text = try std.Io.Dir.cwd().readFileAlloc(ctx.io, config_path, ctx.alloc, .limited(1 << 20));
+        expect(&ctx, std.mem.indexOf(u8, cfg_text, new_repo) != null, "config contains new repo");
+        expect(&ctx, std.mem.indexOf(u8, cfg_text, "\"kind\": \"zig\"") != null, "config carries kind");
+
+        const imported_dir = try std.Io.Dir.path.join(ctx.alloc, &.{ repos_root, new_repo });
+        expect(&ctx, git.dirExists(&ctx, imported_dir), "add --sync cloned the repo");
+    }
+
+    current = "add duplicate repo is refused";
+    {
+        const args = base_args.items;
+        const dup_url = try std.Io.Dir.path.join(ctx.alloc, &.{ origins, "alpha.git" });
+        const res = try fmrRun(&ctx, args, &.{ "add", "alpha", dup_url }, &pr_env);
+        expectExit(&ctx, res, 2, "duplicate add exits 2");
+    }
+
+    current = "remove unregisters repo from config";
+    {
+        const args = base_args.items;
+        const res = try fmrRun(&ctx, args, &.{ "remove", "imported" }, &pr_env);
+        expectExit(&ctx, res, 0, "remove exits 0");
+
+        const cfg_text = try std.Io.Dir.cwd().readFileAlloc(ctx.io, config_path, ctx.alloc, .limited(1 << 20));
+        expect(&ctx, std.mem.indexOf(u8, cfg_text, "imported") == null, "config no longer contains removed repo");
+
+        const res2 = try fmrRun(&ctx, args, &.{ "status", "imported" }, &pr_env);
+        expectExit(&ctx, res2, 2, "status on removed repo exits 2");
+
+        const res3 = try fmrRun(&ctx, args, &.{ "remove", "imported" }, &pr_env);
+        expectExit(&ctx, res3, 2, "removing a missing repo exits 2");
+    }
+
     pr.line(&ctx, .gray, "e2e tmp dir kept for inspection on failure: {s}", .{tmp});
     if (failures > 0) {
         pr.line(&ctx, .red, "{d} e2e scenario(s) failed", .{failures});
