@@ -23,10 +23,13 @@ Each issue is formatted with clear **Context**, **CLI Signatures**, **Architectu
 
 | Issue | Slice | Title | Spec Document | Status |
 |---|---|---|---|---|
-| **#5** | GUI-1 | Swift Package Architecture, Process Bridge, & JSON Decoders | [`issue-05-gui-1-swift-bridge-and-models.md`](./issue-05-gui-1-swift-bridge-and-models.md) | Ready |
-| **#6** | GUI-2 | macOS Menu Bar Companion Popover (`MenuBarView`) | [`issue-06-gui-2-menu-bar-companion.md`](./issue-06-gui-2-menu-bar-companion.md) | Ready |
-| **#7** | GUI-3 | Full Workspace Dashboard Window (`WorkspaceDashboardView`) | [`issue-07-gui-3-workspace-dashboard.md`](./issue-07-gui-3-workspace-dashboard.md) | Ready |
-| **#8** | GUI-4 | Diagnostics Sheet, App Packaging (`scripts/build_app.sh`), & Polish | [`issue-08-gui-4-diagnostics-and-packaging.md`](./issue-08-gui-4-diagnostics-and-packaging.md) | Ready |
+| **#5** | GUI-1 | Swift Package Architecture, Process Bridge, & JSON Decoders | [`issue-05-gui-1-swift-bridge-and-models.md`](./issue-05-gui-1-swift-bridge-and-models.md) | Closed (PR #12) |
+| **#6** | GUI-2 | macOS Menu Bar Companion Popover (`MenuBarView`) | [`issue-06-gui-2-menu-bar-companion.md`](./issue-06-gui-2-menu-bar-companion.md) | Closed (PR #12) |
+| **#7** | GUI-3 | Full Workspace Dashboard Window (`WorkspaceDashboardView`) | [`issue-07-gui-3-workspace-dashboard.md`](./issue-07-gui-3-workspace-dashboard.md) | Closed (PR #12) |
+| **#8** | GUI-4 | Diagnostics Sheet, App Packaging (`scripts/build_app.sh`), & Polish | [`issue-08-gui-4-diagnostics-and-packaging.md`](./issue-08-gui-4-diagnostics-and-packaging.md) | Closed (PR #12) |
+| **#13** | GUI-5 | Worktree Operations, Editor Launchers, & Extended Models | [`issue-09-gui-5-worktree-management-and-extended-models.md`](./issue-09-gui-5-worktree-management-and-extended-models.md) | Closed (PR #14) |
+| **#15** | GUI-6 | Repository Onboarding: `fmr add`, Native GUI Import Sheet & Drag-and-Drop | [`issue-10-repo-management-and-import.md`](./issue-10-repo-management-and-import.md) | Ready |
+
 
 ---
 
