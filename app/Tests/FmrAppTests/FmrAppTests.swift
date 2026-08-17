@@ -111,6 +111,51 @@ final class FmrAppTests: XCTestCase {
         XCTAssertTrue(response.checks[1].isWarning)
     }
 
+    func testDecodeConfigJsonWithCatalogFields() throws {
+        let json = """
+        {
+          "version": 1,
+          "command": "config",
+          "exit": 0,
+          "paths": {
+            "repos": "/Users/t/dev/drawmeanelephant",
+            "worktrees": "/Users/t/Code/worktrees",
+            "sourceRag": "/Users/t/Code/source-rag"
+          },
+          "parallelism": { "sync": 4, "status": 4, "check": 1, "rag": 1 },
+          "repos": [
+            {
+              "name": "boris",
+              "url": "git@github.com:drawmeanelephant/boris.git",
+              "kind": "zig",
+              "path": "/Users/t/dev/drawmeanelephant/boris",
+              "default_branch": "afterparty",
+              "worktree_safe": true,
+              "sync_enabled": true,
+              "check": ["zig", "build", "test"],
+              "rag": { "mode": "command", "argv": ["python3", "export.sh"], "output": "{rag_out}" },
+              "env": [],
+              "commands": { "serve": ["zig", "build", "run", "--", "serve"], "site": ["zig", "build"] }
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(ConfigResponse.self, from: json)
+        XCTAssertEqual(response.command, "config")
+        XCTAssertEqual(response.paths?.repos, "/Users/t/dev/drawmeanelephant")
+        XCTAssertEqual(response.paths?.worktrees, "/Users/t/Code/worktrees")
+
+        let repo = response.repos?.first
+        XCTAssertEqual(repo?.name, "boris")
+        XCTAssertEqual(repo?.kind, "zig")
+        XCTAssertEqual(repo?.path, "/Users/t/dev/drawmeanelephant/boris")
+        XCTAssertEqual(repo?.syncEnabled, true)
+        XCTAssertEqual(repo?.rag?.mode, "command")
+        XCTAssertEqual(repo?.commands?["serve"], ["zig", "build", "run", "--", "serve"])
+        XCTAssertEqual(repo?.commands?["site"], ["zig", "build"])
+    }
+
     func testDecodeRagJson() throws {
         let json = """
         {

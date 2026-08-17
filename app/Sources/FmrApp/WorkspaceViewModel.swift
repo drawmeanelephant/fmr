@@ -35,11 +35,56 @@ public final class WorkspaceViewModel: @unchecked Sendable {
     public var selectedFilter: RepoFilter = .all
     public var lastUpdated: Date? = nil
 
+    // Catalog metadata loaded from `fmr config --json` (paths, commands, kinds).
+    public var configPaths: ConfigPaths? = nil
+    public var catalog: [String: ConfigRepoItem] = [:]
+    public var catalogLoaded: Bool = false
+
     private let bridge: FMRBridge
     private var timer: Timer?
 
     public init(bridge: FMRBridge = .shared) {
         self.bridge = bridge
+        loadCatalog()
+    }
+
+    /// Loads the workspace catalog (`fmr config --json`) so the UI never
+    /// hardcodes workspace layout or command lists.
+    public func loadCatalog() {
+        Task {
+            do {
+                let response: ConfigResponse = try await bridge.run(["config"])
+                await MainActor.run {
+                    var map: [String: ConfigRepoItem] = [:]
+                    for item in response.repos ?? [] {
+                        map[item.name] = item
+                    }
+                    self.catalog = map
+                    self.configPaths = response.paths
+                    self.catalogLoaded = true
+                }
+            } catch {
+                await MainActor.run {
+                    self.catalogLoaded = false
+                }
+            }
+        }
+    }
+
+    /// Primary checkout root from the catalog (falls back to the historical default).
+    public var reposRoot: String {
+        configPaths?.repos ?? "\(NSHomeDirectory())/dev/drawmeanelephant"
+    }
+
+    /// Conductor worktrees root from the catalog (falls back to the historical default).
+    public var worktreesRoot: String {
+        configPaths?.worktrees ?? "\(NSHomeDirectory())/Code/worktrees"
+    }
+
+    /// Configured custom commands (name + argv) for a repo, from the catalog.
+    public func customCommands(for name: String) -> [(String, [String])] {
+        guard let item = catalog[name], let commands = item.commands else { return [] }
+        return commands.keys.sorted().map { ($0, commands[$0] ?? []) }
     }
 
     public func startAutoRefresh(interval: TimeInterval = 15.0) {
@@ -75,17 +120,13 @@ public final class WorkspaceViewModel: @unchecked Sendable {
             case .dirty:
                 return repo.isDirty || repo.isBehind || repo.isSnapStale || repo.state != "ok"
             case .zig:
-                if let k = repo.kind { return k == "zig" }
-                return ["boris", "oliver", "DipshitOS"].contains(repo.name)
+                return repo.kind == "zig"
             case .go:
-                if let k = repo.kind { return k == "go" }
-                return ["know", "codex-limits"].contains(repo.name)
+                return repo.kind == "go"
             case .sites:
-                if let k = repo.kind { return k == "site" }
-                return ["fullonrogues.org", "thermalextractiondevices.com", "corgifever.com"].contains(repo.name)
+                return repo.kind == "site"
             case .tools:
-                if let k = repo.kind { return k == "bash" || k == "other" }
-                return ["rotkeeper", "minutes-without-motion", "la-famille", "filed.fyi", "apex"].contains(repo.name)
+                return repo.kind == "bash" || repo.kind == "other"
             }
         }
     }
@@ -117,6 +158,7 @@ public final class WorkspaceViewModel: @unchecked Sendable {
                     self.lastUpdated = Date()
                     self.isRefreshing = false
                     self.discoverWorktrees()
+                    if !self.catalogLoaded { self.loadCatalog() }
                 }
             } catch {
                 await MainActor.run {
@@ -239,9 +281,8 @@ public final class WorkspaceViewModel: @unchecked Sendable {
 
     @MainActor
     public func createWorktree(repoName: String, sessionName: String, branch: String) {
-        let home = NSHomeDirectory()
-        let repoPath = "\(home)/dev/drawmeanelephant/\(repoName)"
-        let targetPath = "\(home)/Code/worktrees/\(repoName)/\(sessionName)"
+        let repoPath = "\(reposRoot)/\(repoName)"
+        let targetPath = "\(worktreesRoot)/\(repoName)/\(sessionName)"
 
         runTask(description: "Creating worktree '\(sessionName)' for \(repoName)...") {
             let proc = Process()
@@ -260,8 +301,7 @@ public final class WorkspaceViewModel: @unchecked Sendable {
 
     @MainActor
     public func removeWorktree(session: WorktreeSession, force: Bool = false) {
-        let home = NSHomeDirectory()
-        let repoPath = "\(home)/dev/drawmeanelephant/\(session.repoName)"
+        let repoPath = "\(reposRoot)/\(session.repoName)"
 
         runTask(description: "Removing worktree '\(session.sessionName)'...") {
             let proc = Process()
@@ -281,8 +321,7 @@ public final class WorkspaceViewModel: @unchecked Sendable {
     }
 
     private func discoverWorktrees() {
-        let home = NSHomeDirectory()
-        let worktreesRoot = "\(home)/Code/worktrees"
+        let worktreesRoot = self.worktreesRoot
         let fm = FileManager.default
 
         guard let repoDirs = try? fm.contentsOfDirectory(atPath: worktreesRoot) else { return }

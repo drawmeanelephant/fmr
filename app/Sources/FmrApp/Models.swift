@@ -164,6 +164,8 @@ public struct RagOutcome: Codable, Identifiable, Sendable {
 
 public struct ConfigResponse: Codable, Sendable {
     public let version: Int?
+    public let command: String?
+    public let exit: Int?
     public let paths: ConfigPaths?
     public let repos: [ConfigRepoItem]?
 }
@@ -181,6 +183,10 @@ public struct ConfigRepoItem: Codable, Identifiable, Sendable {
     public let kind: String?
     public let defaultBranch: String?
     public let worktreeSafe: Bool?
+    public let syncEnabled: Bool?
+    public let path: String?
+    public let commands: [String: [String]]?
+    public let rag: RagConfig?
 
     enum CodingKeys: String, CodingKey {
         case name
@@ -188,7 +194,15 @@ public struct ConfigRepoItem: Codable, Identifiable, Sendable {
         case kind
         case defaultBranch = "default_branch"
         case worktreeSafe = "worktree_safe"
+        case syncEnabled = "sync_enabled"
+        case path
+        case commands
+        case rag
     }
+}
+
+public struct RagConfig: Codable, Sendable {
+    public let mode: String?
 }
 
 // MARK: - Session / Worktree Model
