@@ -149,7 +149,29 @@ Field types and enums:
 
 - Per-repo `status`: `ok | failed | skipped`. No top-level summary.
 
-## 5. `fmr rag --json`
+## 5. `fmr run <repo> <cmd> [args...] --json`
+
+```json
+{
+  "version": 1,
+  "command": "run",
+  "exit": 0,
+  "repos": [
+    { "name": "boris", "result": "ok", "exit": 0, "message": "command 'serve' exited 0" },
+    { "name": "rotkeeper", "result": "failed", "exit": 4, "message": "command 'init' exited 2" }
+  ]
+}
+```
+
+- `result`: `ok | failed`. `exit` follows the fmr contract (0 ok, 4 subprocess
+  failed); the raw subprocess code is preserved in `message`.
+- In `--json` mode the captured subprocess stdout/stderr is forwarded to fmr's
+  **stderr** so stdout stays clean JSON.
+- **Default (no `--json`) behavior is unchanged**: subprocess output streams to
+  stdout/stderr. GUI live consoles should keep using streaming and may use
+  `--json` for a typed completion event.
+
+## 6. `fmr rag --json`
 
 ```json
 {
@@ -168,7 +190,7 @@ Field types and enums:
   `snap`, `"up to date"`, `skip`, `missing`, `not_repo`, `worktree`, `unborn`,
   `dirty`, `none`.
 
-## 6. `fmr config --json` (catalog dump)
+## 7. `fmr config --json` (catalog dump)
 
 `fmr config` (aliased `fmr config --json`) emits the full parsed catalog so the
 app never parses `workspace.json`: paths, parallelism, and every repo with its
@@ -199,7 +221,7 @@ app never parses `workspace.json`: paths, parallelism, and every repo with its
 }
 ```
 
-## 7. `fmr rag --gc <n> --json` — different shape!
+## 8. `fmr rag --gc <n> --json` — different shape!
 
 ```json
 { "version": 1, "command": "rag-gc", "exit": 0, "pruned": 3, "retaining": 2 }
@@ -214,9 +236,9 @@ No `repos` array. Model this as a separate type if the app surfaces GC.
 2. **Drain both pipes**: while `Process` runs, read stdout *and* stderr
    concurrently (`FileHandle.readabilityHandler` on both) or a chatty exporter
    (`fmr rag`) will fill the 64 KB pipe buffer and deadlock the child.
-3. **`fmr run` has no `--json`** and streams output directly to the terminal —
-   GUI-3's live console should use `fmr run <repo> <cmd>` with raw output
-   forwarding, not the JSON path.
+3. **`fmr run`**: default streams output directly (GUI-3's live console should
+   use this); `--json` emits a typed completion envelope (section 5) for logging
+   results.
 4. **One process per action**: `sync`/`status` parallelize internally. "Sync All"
    is a single `fmr sync --all --json` process — spawning N processes would trip
    fmr's own per-repo locks.

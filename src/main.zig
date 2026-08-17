@@ -142,7 +142,7 @@ pub fn main(init: std.process.Init) u8 {
         const run_repo = repo_args.items[0];
         const run_cmd = repo_args.items[1];
         const run_extra = repo_args.items[2..];
-        return exec.runCmd(&ctx, &cfg, run_repo, run_cmd, run_extra, &pr);
+        return exec.runCmd(&ctx, &cfg, run_repo, run_cmd, run_extra, json_out, &pr);
     } else if (std.mem.eql(u8, c, "rag")) {
         if (repo_args.items.len > 0) {
             if (unknownRepo(&ctx, &cfg, repo_args.items)) return 2;
