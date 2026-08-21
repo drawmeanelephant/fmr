@@ -130,8 +130,7 @@ pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, pattern: []const 
                     clean.appendSlice("\\n") catch return 1;
                 } else if (ch == '\r') {
                     clean.appendSlice("\\r") catch return 1;
-                } else if (ch < 0x20) {
-                } else {
+                } else if (ch < 0x20) {} else {
                     clean.append(ch) catch return 1;
                 }
             }

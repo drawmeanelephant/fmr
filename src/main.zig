@@ -455,11 +455,7 @@ fn runOpen(ctx: *const process.Ctx, cfg: *const config.Config, name: []const u8,
             else => ed,
         };
         // Map common aliases
-        const resolved = if (std.mem.eql(u8, ed, "cursor")) "Cursor"
-        else if (std.mem.eql(u8, ed, "vscode") or std.mem.eql(u8, ed, "code")) "Visual Studio Code"
-        else if (std.mem.eql(u8, ed, "zed")) "Zed"
-        else if (std.mem.eql(u8, ed, "xcode")) "Xcode"
-        else ed;
+        const resolved = if (std.mem.eql(u8, ed, "cursor")) "Cursor" else if (std.mem.eql(u8, ed, "vscode") or std.mem.eql(u8, ed, "code")) "Visual Studio Code" else if (std.mem.eql(u8, ed, "zed")) "Zed" else if (std.mem.eql(u8, ed, "xcode")) "Xcode" else ed;
         _ = app_name;
         const res = process.run(ctx, &.{ "open", "-a", resolved, target }, .{}) catch return 1;
         if (!res.ok()) {
