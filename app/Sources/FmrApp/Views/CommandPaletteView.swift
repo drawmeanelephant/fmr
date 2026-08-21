@@ -38,6 +38,22 @@ public struct CommandPaletteView: View {
 
             Divider()
 
+            // Hint when query empty — #34 discoverability
+            if query.isEmpty {
+                HStack {
+                    Text("Try “Sync All” or type a repo name")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Text("\(model.repos.count) repos")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
+            }
+
             // Results List — #31 empty states
             Group {
                 if !query.isEmpty && filteredList.isEmpty && model.repos.isEmpty {
@@ -147,11 +163,30 @@ public struct CommandPaletteView: View {
                         }
                     }
                     .listStyle(.inset)
+                    .focusable(true)
+                    .onMoveCommand { _ in }
+                    .accessibilityLabel("Command palette results")
                 }
             }
             .frame(minHeight: 200)
+
+            Divider()
+            // Footer legend — #34 discoverability
+            HStack(spacing: 8) {
+                Text("⌘K palette • ⌘R refresh • ⌘N add • ⇧⌘O recents • ? help")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                Spacer()
+                Text("\(model.repos.count) repos")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .accessibilityLabel("\(model.repos.count) repositories")
+            }
+            .padding(8)
+            .background(.bar)
         }
-        .frame(width: 500, height: 380)
+        .frame(width: 500, height: 420)
     }
 
     private var filteredList: [RepoStatus] {

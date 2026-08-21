@@ -12,7 +12,12 @@ private struct HelpCommandsView: View {
     var body: some View {
         Button("Fmr Help...") { openWindow(id: "help") }
             .keyboardShortcut("?", modifiers: .command)
+        Button("Keyboard Shortcuts...") { openWindow(id: "help") }
         Button("Welcome to Fmr...") { model.forceShowWelcome() }
+        Divider()
+        Button("Copy Debug Info") {
+            DebugInfoProvider.copyDebugInfo(model: model)
+        }
     }
 }
 
@@ -59,12 +64,13 @@ struct FmrApp: App {
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About Fmr") {
+                    let core = Bundle.main.infoDictionary?["FMRCoreVersion"] as? String ?? "0.2.0"
                     NSApp.orderFrontStandardAboutPanel(
                         options: [
                             .applicationName: "Fmr",
                             .applicationVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.2.0",
-                            .version: Bundle.main.infoDictionary?["FMRCoreVersion"] as? String ?? "0.2.0",
-                            .credits: NSAttributedString(string: "Fix My Repository — deterministic workspace manager.\nCore: fmr \(Bundle.main.infoDictionary?["FMRCoreVersion"] as? String ?? "0.2.0")"),
+                            .version: core,
+                            .credits: NSAttributedString(string: "Fix My Repository — deterministic workspace manager.\nCore: fmr \(core)\n\nfmr status  •  fmr sync  •  fmr context | pbcopy\nDocs: github.com/drawmeanelephant/fmr\nConfig: ~/config/fmr/workspace.json"),
                         ]
                     )
                 }
@@ -102,6 +108,18 @@ struct FmrApp: App {
             // Future #34 must add items inside this group, not recreate it.
             CommandGroup(replacing: .help) {
                 HelpCommandsView(model: model)
+            }
+            // #34 discoverability — palette commands after toolbar
+            CommandGroup(after: .toolbar) {
+                Button("Command Palette...") {
+                    model.isCommandPalettePresented = true
+                }
+                .keyboardShortcut("k", modifiers: .command)
+                Button("Recent Repositories...") {
+                    model.paletteFilter = .recents
+                    model.isCommandPalettePresented = true
+                }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
             }
         }
         Settings {

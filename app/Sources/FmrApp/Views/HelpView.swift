@@ -102,6 +102,26 @@ public struct HelpView: View {
                 .controlSize(.small)
             }
             .padding(.top, 4)
+
+            // #34 Copy Debug Info — next to panel trigger, as About fallback
+            HStack(spacing: 8) {
+                Button {
+                    DebugInfoProvider.copyDebugInfo(model: model)
+                } label: {
+                    Label("Copy Debug Info", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Copy debug info for bug reports")
+
+                Text(DebugInfoProvider.debugString(model: model).components(separatedBy: "\n").first ?? "")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+            }
+            .padding(.top, 2)
         }
     }
 
