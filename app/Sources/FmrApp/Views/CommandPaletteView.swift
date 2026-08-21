@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 public struct CommandPaletteView: View {
     @Bindable var model: WorkspaceViewModel
@@ -37,87 +38,118 @@ public struct CommandPaletteView: View {
 
             Divider()
 
-            // Results List
-            List {
-                if recentsOnly {
-                    if !filteredRecents.isEmpty {
-                        Section("Recent Repositories (\(filteredRecents.count))") {
-                            ForEach(filteredRecents) { entry in
-                                recentRow(entry)
-                            }
-                        }
-                    }
-
-                    Section {
-                        Button {
-                            recentsOnly = false
-                            query = ""
-                        } label: {
-                            Label("Show All Repositories", systemImage: "list.bullet")
-                        }
-                    }
-                } else {
-                    Section("Quick Actions") {
-                        Button {
-                            model.syncAll()
-                            dismiss()
-                        } label: {
-                            Label("Sync All Repositories", systemImage: "arrow.triangle.2.circlepath")
-                        }
-
-                        Button {
-                            model.ragAll()
-                            dismiss()
-                        } label: {
-                            Label("Generate RAG Snapshots for All", systemImage: "camera")
-                        }
-
-                        Button {
-                            model.runDoctor(fix: false)
+            // Results List — #31 empty states
+            Group {
+                if !query.isEmpty && filteredList.isEmpty && model.repos.isEmpty {
+                    EmptyStateView.noRepos(style: .regular, onAdd: {
+                        model.isAddRepoPresented = true
                         dismiss()
-                        } label: {
-                            Label("Run Doctor Diagnostics", systemImage: "stethoscope")
-                        }
-
-                        Button {
-                            model.runDoctor(fix: true)
-                            dismiss()
-                        } label: {
-                            Label("Fix Stale Locks & Staging Directories", systemImage: "wrench.and.screwdriver")
-                        }
-                    }
-
-                    Section("Repositories (\(filteredList.count))") {
-                        ForEach(filteredList) { repo in
-                            Button {
-                                model.selectedRepo = repo
-                                dismiss()
-                            } label: {
-                                HStack {
-                                    Circle()
-                                        .fill(repo.isClean ? Color.green : (repo.isDirty ? Color.orange : Color.yellow))
-                                        .frame(width: 8, height: 8)
-                                    Text(repo.name)
-                                        .font(.headline)
-                                    Spacer()
-                                    Text(repo.branch)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                    }, onOpenWorkspace: {
+                        let path = model.resolvedConfigPath
+                        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                    })
+                    .frame(maxHeight: .infinity)
+                } else if !query.isEmpty && filteredList.isEmpty && model.repos.count > 0 {
+                    EmptyStateView.noSearchResults(query: query, style: .regular, onClear: {
+                        query = ""
+                    })
+                    .frame(maxHeight: .infinity)
+                } else {
+                    List {
+                        if recentsOnly {
+                            if !filteredRecents.isEmpty {
+                                Section("Recent Repositories (\(filteredRecents.count))") {
+                                    ForEach(filteredRecents) { entry in
+                                        recentRow(entry)
+                                    }
+                                }
+                            } else if !query.isEmpty {
+                                Section {
+                                    EmptyStateView.noSearchResults(query: query, style: .regular, onClear: { query = "" })
+                                        .listRowInsets(EdgeInsets())
+                                }
+                            } else {
+                                Section {
+                                    EmptyStateView.noRecents(style: .regular, onBrowse: nil)
+                                        .listRowInsets(EdgeInsets())
                                 }
                             }
-                        }
-                    }
 
-                    if !filteredRecents.isEmpty {
-                        Section("Recent Repositories (\(filteredRecents.count))") {
-                            ForEach(filteredRecents) { entry in
-                                recentRow(entry)
+                            Section {
+                                Button {
+                                    recentsOnly = false
+                                    query = ""
+                                } label: {
+                                    Label("Show All Repositories", systemImage: "list.bullet")
+                                }
+                            }
+                        } else {
+                            Section("Quick Actions") {
+                                Button {
+                                    model.syncAll()
+                                    dismiss()
+                                } label: {
+                                    Label("Sync All Repositories", systemImage: "arrow.triangle.2.circlepath")
+                                }
+
+                                Button {
+                                    model.ragAll()
+                                    dismiss()
+                                } label: {
+                                    Label("Generate RAG Snapshots for All", systemImage: "camera")
+                                }
+
+                                Button {
+                                    model.runDoctor(fix: false)
+                                dismiss()
+                                } label: {
+                                    Label("Run Doctor Diagnostics", systemImage: "stethoscope")
+                                }
+
+                                Button {
+                                    model.runDoctor(fix: true)
+                                    dismiss()
+                                } label: {
+                                    Label("Fix Stale Locks & Staging Directories", systemImage: "wrench.and.screwdriver")
+                                }
+                            }
+
+                            Section("Repositories (\(filteredList.count))") {
+                                ForEach(filteredList) { repo in
+                                    Button {
+                                        model.selectedRepo = repo
+                                        dismiss()
+                                    } label: {
+                                        HStack {
+                                            Circle()
+                                                .fill(repo.isClean ? Color.green : (repo.isDirty ? Color.orange : Color.yellow))
+                                                .frame(width: 8, height: 8)
+                                            Text(repo.name)
+                                                .font(.headline)
+                                            Spacer()
+                                            Text(repo.branch)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                            }
+
+                            if !filteredRecents.isEmpty {
+                                Section("Recent Repositories (\(filteredRecents.count))") {
+                                    ForEach(filteredRecents) { entry in
+                                        recentRow(entry)
+                                    }
+                                }
+                            } else if query.isEmpty && model.recentRepos.isEmpty {
+                                // keep palette quiet when no recents; #31 noRecents only shown in recentsOnly mode
                             }
                         }
                     }
+                    .listStyle(.inset)
                 }
             }
-            .listStyle(.inset)
+            .frame(minHeight: 200)
         }
         .frame(width: 500, height: 380)
     }

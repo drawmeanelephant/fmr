@@ -70,6 +70,18 @@ Each issue is formatted with clear **Context**, **CLI Signatures**, **Architectu
 | **#28** | `fmr mcp` — MCP server for Claude/Cursor | [`issue-28-fmr-mcp.md`](./issue-28-fmr-mcp.md) | M | Closed (whirrrr) |
 | **#29** | `fmr daemon` — optional launchd auto-sync | [`issue-29-fmr-daemon.md`](./issue-29-fmr-daemon.md) | S | Closed (whirrrr) |
 
+### M3 v0.4 GUI Polish & Help — “Make the next person smile” (Next sprint)
+
+| Issue | Title | Spec Document | Size | Status |
+|---|---|---|---|---|
+| **#30** | Welcome & Help — First-run guidance and in-app help | [`issue-30-welcome-and-help.md`](./issue-30-welcome-and-help.md) | S | Open (#30) |
+| **#31** | Empty States & Delight — Every empty list has a CTA | [`issue-31-empty-states-and-delight.md`](./issue-31-empty-states-and-delight.md) | S | Open (#31) |
+| **#32** | Visual Motion & Feedback — Alive, not static | [`issue-32-visual-motion-and-feedback.md`](./issue-32-visual-motion-and-feedback.md) | S | Open (#32) |
+| **#33** | Remediation & Contextual Help — Errors that fix themselves | [`issue-33-remediation-and-contextual-help.md`](./issue-33-remediation-and-contextual-help.md) | S | Open (#33) |
+| **#34** | Discoverability & About — Make the app findable | [`issue-34-discoverability-and-about.md`](./issue-34-discoverability-and-about.md) | S | Open (#34) |
+
+Milestone: [`M3 v0.4 GUI Polish & Help`](https://github.com/drawmeanelephant/fmr/milestone/1) — 5 open, 0 closed.
+
 Detailed timeline, exit criteria, and non-goals: [`docs/MILESTONES.md`](../MILESTONES.md).
 
 ---

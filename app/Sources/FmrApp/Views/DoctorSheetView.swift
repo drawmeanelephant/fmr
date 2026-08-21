@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 public struct DoctorSheetView: View {
     @Bindable var model: WorkspaceViewModel
@@ -56,6 +57,20 @@ public struct DoctorSheetView: View {
 
                 Spacer()
 
+                if !model.doctorChecks.isEmpty {
+                    Button {
+                        let text = model.doctorChecks.map { "[\($0.level)] \($0.message)" }.joined(separator: "\n")
+                        let pb = NSPasteboard.general
+                        pb.clearContents()
+                        pb.setString(text, forType: .string)
+                        NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
+                    } label: {
+                        Label("Copy All", systemImage: "doc.on.doc")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
                 Button {
                     model.runDoctor(fix: true)
                 } label: {
@@ -72,11 +87,10 @@ public struct DoctorSheetView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     if model.doctorChecks.isEmpty {
-                        Text("No diagnostics run yet. Click 'Fix Issues' or 'Re-run' below.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 30)
-                            .frame(maxWidth: .infinity, alignment: .center)
+                        EmptyStateView.noDoctor(style: .regular, onRun: {
+                            model.runDoctor(fix: false)
+                        })
+                        .frame(maxWidth: .infinity, minHeight: 200)
                     } else {
                         ForEach(model.doctorChecks) { check in
                             HStack(alignment: .top, spacing: 10) {
@@ -89,6 +103,18 @@ public struct DoctorSheetView: View {
                                     .foregroundStyle(.primary)
 
                                 Spacer()
+
+                                Button {
+                                    let pb = NSPasteboard.general
+                                    pb.clearContents()
+                                    pb.setString(check.message, forType: .string)
+                                    NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
+                                } label: {
+                                    Image(systemName: "doc.on.doc")
+                                        .font(.caption2)
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Copy diagnostic line")
                             }
                             .padding(10)
                             .background(Color(NSColor.controlBackgroundColor))

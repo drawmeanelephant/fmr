@@ -602,16 +602,33 @@ fn unknownRepo(ctx: *const process.Ctx, cfg: *const config.Config, names: []cons
 }
 
 fn help(ctx: *const process.Ctx) u8 {
-    process.stderrLineNewline(ctx, "fmr — Workspace Manager in Zig", .{});
-    process.stderrLineNewline(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>] [--force] [--fix] [--fix-origin] [--gc <n>] [--json]", .{});
-    process.stderrLineNewline(ctx, "commands: status | sync | doctor | config | check | run | rag | add | remove | list | open | completion | context | grep | mcp | daemon", .{});
-    process.stderrLineNewline(ctx, "  fmr list [--kind <kind>] [--json]                list repos (config-only, instant)", .{});
-    process.stderrLineNewline(ctx, "  fmr open <repo> [--worktree <s>] [--editor <e>]  open checkout (Finder/Terminal/Editor)", .{});
-    process.stderrLineNewline(ctx, "  fmr completion <zsh|bash|fish>                   shell completions", .{});
-    process.stderrLineNewline(ctx, "  fmr context [repo...] [--json]                   AI-ready workspace dump", .{});
-    process.stderrLineNewline(ctx, "  fmr grep <pattern> [repo...] [--kind <k>]       cross-repo search", .{});
-    process.stderrLineNewline(ctx, "  fmr mcp [--config <path>]                        MCP server (stdio)", .{});
-    process.stderrLineNewline(ctx, "  fmr daemon <install|uninstall|status|run>        optional launchd auto-sync", .{});
+    var pr = ui.Printer.initFromCtx(ctx);
+    pr.raw(ctx, "fmr {s} — Safe, fast-forward workspace manager — never runs reset --hard / checkout --force", .{version});
+    pr.raw(ctx, "usage: fmr <command> [repo...] [--all] [--config <path>] [--jobs <n>] [--force] [--fix] [--json]", .{});
+    pr.raw(ctx, "", .{});
+    pr.raw(ctx, "inspect: status/list/context/grep   read-only views", .{});
+    pr.raw(ctx, "  status                 parallel git + snapshot inspection", .{});
+    pr.raw(ctx, "  list [--kind <k>]      list repos (config-only, instant)", .{});
+    pr.raw(ctx, "  context [repo...]      AI-ready workspace dump", .{});
+    pr.raw(ctx, "  grep <pat> [repo...]   cross-repo search (--kind filter)", .{});
+    pr.raw(ctx, "", .{});
+    pr.raw(ctx, "mutate: sync/rag            safe mutations (locked, refuse on dirty)", .{});
+    pr.raw(ctx, "  sync [repo...]         fetch + ff-only (or clone)", .{});
+    pr.raw(ctx, "  rag [repo...] [--force] immutable snapshots", .{});
+    pr.raw(ctx, "", .{});
+    pr.raw(ctx, "run: check/run/open        per-repo execution", .{});
+    pr.raw(ctx, "  check [repo...]        run configured check (kind default)", .{});
+    pr.raw(ctx, "  run <repo> <cmd>       run named command", .{});
+    pr.raw(ctx, "  open <repo>            open checkout (Finder/Terminal/Editor)", .{});
+    pr.raw(ctx, "", .{});
+    pr.raw(ctx, "system: doctor/config/completion/mcp/daemon", .{});
+    pr.raw(ctx, "  doctor [--fix]         offline diagnostics + fix", .{});
+    pr.raw(ctx, "  config                 dump catalog JSON", .{});
+    pr.raw(ctx, "  completion <shell>     shell completions (zsh/bash/fish)", .{});
+    pr.raw(ctx, "  mcp                    MCP server (stdio)", .{});
+    pr.raw(ctx, "  daemon <sub>           optional launchd auto-sync", .{});
+    pr.raw(ctx, "", .{});
+    pr.raw(ctx, "Tips: fmr context | pbcopy  \xE2\x80\xA2  fmr grep TODO --kind zig  \xE2\x80\xA2  eval \"$(fmr completion zsh)\"", .{});
     return 0;
 }
 

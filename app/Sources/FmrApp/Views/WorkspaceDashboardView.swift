@@ -6,6 +6,10 @@ public struct WorkspaceDashboardView: View {
     @Bindable var model: WorkspaceViewModel
     @State private var pendingRemoveRepo: RepoStatus? = nil
     @State private var pendingAddDirectory: URL? = nil
+    @State private var showWelcome: Bool = false
+    @State private var isSidebarTargeted: Bool = false
+    @State private var sidebarSyncFeedback: String? = nil
+    @Environment(\.openWindow) private var openWindow
 
     public init(model: WorkspaceViewModel) {
         self.model = model
@@ -15,7 +19,7 @@ public struct WorkspaceDashboardView: View {
         NavigationSplitView {
             // Sidebar
             VStack(spacing: 0) {
-                // Filter Picker
+                // Filter Picker — keep visible even when filtered empty (#31)
                 Picker("Filter", selection: $model.selectedFilter) {
                     ForEach(RepoFilter.allCases) { filter in
                         Text(filter.rawValue).tag(filter)
@@ -24,61 +28,126 @@ public struct WorkspaceDashboardView: View {
                 .pickerStyle(.segmented)
                 .padding(8)
 
-                // Repositories List
-                List(selection: $model.selectedRepo) {
-                    Section("Repositories (\(model.filteredRepos.count))") {
-                        ForEach(model.filteredRepos) { repo in
-                            DashboardRepoRow(repo: repo, model: model)
-                                .tag(repo)
-                                .contextMenu {
-                                    Button("Sync") { model.syncRepo(name: repo.name) }
-                                    Button("Check") { model.checkRepo(name: repo.name) }
-                                    Button("RAG Snapshot") { model.ragRepo(name: repo.name) }
-                                    Divider()
-                                    Button("New Worktree...") {
-                                        model.selectedRepo = repo
-                                        model.isCreateWorktreePresented = true
-                                    }
-                                    Divider()
-                                    Button("Open in Cursor") { model.openIn(editor: .cursor, path: repo.resolvedPath) }
-                                    Button("Open in VS Code") { model.openIn(editor: .vscode, path: repo.resolvedPath) }
-                                    Button("Open in Zed") { model.openIn(editor: .zed, path: repo.resolvedPath) }
-                                    Button("Open in Terminal") { model.openIn(editor: .terminal, path: repo.resolvedPath) }
-                                    Button("Reveal in Finder") { model.openIn(editor: .finder, path: repo.resolvedPath) }
-                                    Divider()
-                                    Button("Remove Repository...", role: .destructive) {
-                                        pendingRemoveRepo = repo
-                                    }
+                // Repositories List — #31 empties, #32 skeletons + transitions
+                Group {
+                    if model.isRefreshing && model.repos.isEmpty && !model.catalogLoaded {
+                        RedactedPlaceholderView()
+                            .transition(.opacity)
+                            .padding(.horizontal, 8)
+                    } else if model.repos.isEmpty {
+                        EmptyStateView.noRepos(style: .regular, onAdd: {
+                            model.isAddRepoPresented = true
+                        }, onOpenWorkspace: {
+                            let path = model.resolvedConfigPath
+                            let url = URL(fileURLWithPath: path)
+                            if FileManager.default.fileExists(atPath: path) {
+                                NSWorkspace.shared.open(url)
+                            } else {
+                                NSWorkspace.shared.open(url.deletingLastPathComponent())
+                            }
+                        })
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if model.filteredRepos.isEmpty {
+                        EmptyStateView.noSearchResults(query: model.searchQuery, style: .regular, onClear: {
+                            model.searchQuery = ""
+                            model.selectedFilter = .all
+                        })
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        List(selection: $model.selectedRepo) {
+                            Section("Repositories (\(model.filteredRepos.count))") {
+                                ForEach(model.filteredRepos) { repo in
+                                    DashboardRepoRow(repo: repo, model: model)
+                                        .tag(repo)
+                                        .transition(.opacity.combined(with: .move(edge: .top)))
+                                        .contextMenu {
+                                            Button("Sync") { model.syncRepo(name: repo.name) }
+                                            Button("Check") { model.checkRepo(name: repo.name) }
+                                            Button("RAG Snapshot") { model.ragRepo(name: repo.name) }
+                                            Divider()
+                                            Button("New Worktree...") {
+                                                model.selectedRepo = repo
+                                                model.isCreateWorktreePresented = true
+                                            }
+                                            Divider()
+                                            Button("Open in Cursor") { model.openIn(editor: .cursor, path: repo.resolvedPath) }
+                                            Button("Open in VS Code") { model.openIn(editor: .vscode, path: repo.resolvedPath) }
+                                            Button("Open in Zed") { model.openIn(editor: .zed, path: repo.resolvedPath) }
+                                            Button("Open in Terminal") { model.openIn(editor: .terminal, path: repo.resolvedPath) }
+                                            Button("Reveal in Finder") { model.openIn(editor: .finder, path: repo.resolvedPath) }
+                                            Divider()
+                                            Button("Remove Repository...", role: .destructive) {
+                                                pendingRemoveRepo = repo
+                                            }
+                                        }
                                 }
+                            }
                         }
+                        .animation(.spring(duration: 0.35), value: model.repos.map(\.id))
                     }
                 }
                 .searchable(text: $model.searchQuery, placement: .sidebar, prompt: "Search repos & branches...")
-                .onDrop(of: [UTType.fileURL], isTargeted: nil) { providers in
+                .onDrop(of: [UTType.fileURL], isTargeted: $isSidebarTargeted) { providers in
                     handleDrop(providers)
+                }
+                .animation(.easeInOut(duration: 0.2), value: isSidebarTargeted)
+                .overlay {
+                    if isSidebarTargeted {
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Color.accentColor, lineWidth: 2)
+                            .background(Color.accentColor.opacity(0.08))
+                            .scaleEffect(1.02)
+                            .padding(4)
+                            .allowsHitTesting(false)
+                    }
                 }
                 Divider()
 
-                // Sidebar Footer: Sync All + Doctor
-                HStack {
-                    Button {
-                        model.syncAll()
-                    } label: {
-                        Label("Sync All", systemImage: "arrow.triangle.2.circlepath")
-                            .font(.caption)
+                // Sidebar Footer: Sync All + Doctor + Freshness (#32)
+                VStack(spacing: 6) {
+                    if let sidebarSyncFeedback {
+                        HStack(spacing: 4) {
+                            Image(systemName: sidebarSyncFeedback.contains("refused") ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(sidebarSyncFeedback.contains("refused") ? Color.orange : Color.green)
+                            Text(sidebarSyncFeedback)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Spacer()
+                        }
+                        .transition(.opacity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.isRefreshing)
+                    HStack {
+                        Button {
+                            triggerSidebarSyncAll()
+                        } label: {
+                            Label("Sync All", systemImage: "arrow.triangle.2.circlepath")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.isRefreshing)
 
-                    Spacer()
+                        Spacer()
 
-                    Button {
-                        model.runDoctor(fix: false)
-                    } label: {
-                        Label("Doctor", systemImage: "stethoscope")
-                            .font(.caption)
+                        Button {
+                            model.runDoctor(fix: false)
+                        } label: {
+                            Label("Doctor", systemImage: "stethoscope")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.bordered)
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                        Text("Last synced: \(model.relativeLastUpdated)")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer()
+                    }
                 }
                 .padding(10)
             }
@@ -88,11 +157,10 @@ public struct WorkspaceDashboardView: View {
             if let repo = model.selectedRepo {
                 RepoDetailView(repo: repo, model: model)
             } else {
-                ContentUnavailableView(
-                    "No Repository Selected",
-                    systemImage: "folder.badge.gearshape",
-                    description: Text("Select a repository from the sidebar to inspect status, snapshots, and commands.")
-                )
+                EmptyStateView.noSelection(style: .regular, onOpenPalette: {
+                    model.paletteFilter = .all
+                    model.isCommandPalettePresented = true
+                })
             }
         }
         .toolbar {
@@ -134,7 +202,9 @@ public struct WorkspaceDashboardView: View {
                 .help("Run Offline Diagnostics")
 
                 Button {
-                    model.isTerminalDrawerOpen.toggle()
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        model.isTerminalDrawerOpen.toggle()
+                    }
                 } label: {
                     Image(systemName: "terminal")
                 }
@@ -155,6 +225,23 @@ public struct WorkspaceDashboardView: View {
         .sheet(isPresented: $model.isAddRepoPresented) {
             AddRepoSheet(model: model, initialDirectory: pendingAddDirectory)
         }
+        .sheet(isPresented: $showWelcome) {
+            WelcomeView(model: model, isPresented: $showWelcome)
+        }
+        .onAppear {
+            if model.shouldShowWelcome {
+                showWelcome = true
+            }
+        }
+        .onChange(of: model.shouldShowWelcome) { _, newValue in
+            if newValue { showWelcome = true }
+        }
+        .onChange(of: model.isWelcomeForced) { _, newValue in
+            if newValue {
+                showWelcome = true
+                model.clearForcedWelcome()
+            }
+        }
         .confirmationDialog(
             "Remove repository '\(pendingRemoveRepo?.name ?? "")' from the workspace?",
             isPresented: Binding(
@@ -174,6 +261,24 @@ public struct WorkspaceDashboardView: View {
             }
         } message: {
             Text("This removes '\(pendingRemoveRepo?.name ?? "")' from workspace.json. The repository folder on disk is left untouched.")
+        }
+    }
+
+    private func triggerSidebarSyncAll() {
+        model.syncAll()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            let out = model.lastTaskOutput
+            let feedback: String
+            if out.contains("refused") || out.contains("failed") {
+                let problems = model.problemCount
+                feedback = problems > 0 ? "\(problems) refused → see banner" : "Sync finished with issues"
+            } else {
+                feedback = "Synced ✓"
+            }
+            withAnimation { sidebarSyncFeedback = feedback }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                withAnimation { sidebarSyncFeedback = nil }
+            }
         }
     }
 
@@ -280,6 +385,7 @@ struct RepoDetailView: View {
     let repo: RepoStatus
     @Bindable var model: WorkspaceViewModel
     @State private var forceRag = false
+    @State private var copied = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -405,10 +511,9 @@ struct RepoDetailView: View {
                         }
 
                         if sessions.isEmpty {
-                            Text("No active session worktrees. Agents run isolated feature branches here.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .padding(.vertical, 8)
+                            EmptyStateView.noWorktrees(repoName: repo.name, style: .regular, onCreate: {
+                                model.isCreateWorktreePresented = true
+                            })
                         } else {
                             VStack(spacing: 8) {
                                 ForEach(sessions) { s in
@@ -481,7 +586,7 @@ struct RepoDetailView: View {
                 .padding(20)
             }
 
-            // Terminal Console Drawer
+            // Terminal Console Drawer — animated + copy feedback
             if model.isTerminalDrawerOpen {
                 Divider()
                 VStack(alignment: .leading, spacing: 4) {
@@ -491,6 +596,18 @@ struct RepoDetailView: View {
                             .foregroundStyle(.secondary)
                         Spacer()
                         Button {
+                            copyOutput()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: copied ? "checkmark.circle.fill" : "doc.on.doc")
+                                    .font(.caption2)
+                                Text(copied ? "Copied ✓" : "Copy")
+                                    .font(.caption2)
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Copy console output")
+                        Button {
                             model.lastTaskOutput = ""
                         } label: {
                             Text("Clear")
@@ -499,7 +616,9 @@ struct RepoDetailView: View {
                         .buttonStyle(.borderless)
 
                         Button {
-                            model.isTerminalDrawerOpen = false
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                model.isTerminalDrawerOpen = false
+                            }
                         } label: {
                             Image(systemName: "xmark")
                                 .font(.caption2)
@@ -519,6 +638,7 @@ struct RepoDetailView: View {
                 }
                 .padding(10)
                 .background(Color(NSColor.windowBackgroundColor))
+                .transition(.move(edge: .bottom))
             }
         }
         .confirmationDialog(
@@ -535,6 +655,17 @@ struct RepoDetailView: View {
             }
         } message: {
             Text("This worktree has uncommitted changes. Removing with --force discards them.")
+        }
+    }
+
+    private func copyOutput() {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(model.lastTaskOutput, forType: .string)
+        NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
+        withAnimation { copied = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            withAnimation { copied = false }
         }
     }
 
