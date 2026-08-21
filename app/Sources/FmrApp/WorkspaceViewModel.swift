@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import AppKit
+import UserNotifications
 
 /// What the command palette should focus on when opened.
 public enum PaletteFilter: Sendable {
@@ -238,7 +239,11 @@ public final class WorkspaceViewModel: @unchecked Sendable {
     public func syncAll() {
         runTask(description: "Syncing All Repositories...") {
             let res: SyncResponse = try await self.bridge.run(["sync", "--all"])
-            return "Sync complete: \(res.summary.ok) ok, \(res.summary.refused) refused, \(res.summary.failed) failed."
+            let summary = "Sync complete: \(res.summary.ok) ok, \(res.summary.refused) refused, \(res.summary.failed) failed."
+            if res.summary.refused > 0 || res.summary.failed > 0 {
+                self.notify(title: "fmr sync", body: summary)
+            }
+            return summary
         }
     }
 
@@ -247,7 +252,23 @@ public final class WorkspaceViewModel: @unchecked Sendable {
         runTask(description: "Syncing \(name)...") {
             let res: SyncResponse = try await self.bridge.run(["sync", name])
             let msg = res.repos.first?.message ?? "Done"
+            if res.summary.refused > 0 || res.summary.failed > 0 {
+                self.notify(title: "fmr sync: \(name)", body: msg)
+            }
             return "\(name): \(msg)"
+        }
+    }
+
+    private func notify(title: String, body: String) {
+        // Best-effort: post notification even when app is active; system will coalesce
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+            center.add(req)
         }
     }
 

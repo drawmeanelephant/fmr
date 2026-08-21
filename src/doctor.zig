@@ -17,9 +17,9 @@ const Check = struct {
 
 const min_free_kib: usize = 1 << 20;
 
-pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, fix: bool, json_out: bool, pr: *ui.Printer) u8 {
+pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, fix: bool, fix_force: bool, json_out: bool, pr: *ui.Printer) u8 {
     if (fix) {
-        fixStale(ctx, cfg, pr) catch {
+        fixStale(ctx, cfg, pr, fix_force) catch {
             process.stderrLineNewline(ctx, "fmr doctor --fix: failed during remediation", .{});
         };
     }
@@ -92,7 +92,7 @@ pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, fix: bool, json_o
     return if (problems > 0) 1 else 0;
 }
 
-pub fn fixStale(ctx: *const process.Ctx, cfg: *const config.Config, pr: *ui.Printer) !void {
+pub fn fixStale(ctx: *const process.Ctx, cfg: *const config.Config, pr: *ui.Printer, fix_force: bool) !void {
     const home_dir = process.home(ctx) orelse return;
 
     // 1. Clean stale locks
@@ -138,6 +138,53 @@ pub fn fixStale(ctx: *const process.Ctx, cfg: *const config.Config, pr: *ui.Prin
                 pr.line(ctx, .yellow, "[fix] removed stale staging directory {s}", .{entry.name});
             }
         } else |_| {}
+    }
+
+    // 3. URL mismatch auto-fix (with --force)
+    for (cfg.repos) |*r| {
+        if (r.url == null) continue;
+        const primary = std.Io.Dir.path.join(ctx.alloc, &.{ cfg.paths.repos, r.name }) catch continue;
+        if (!git.dirExists(ctx, primary)) continue;
+        const gk = git.gitDirKind(ctx, primary) catch continue;
+        if (gk != .directory) continue;
+        const actual = (git.remoteUrl(ctx, primary) catch continue) orelse continue;
+        if (std.mem.eql(u8, actual, r.url.?)) continue;
+        if (fix_force) {
+            const res = process.run(ctx, &.{ "git", "-C", primary, "remote", "set-url", "origin", r.url.? }, .{}) catch continue;
+            if (res.ok()) {
+                pr.line(ctx, .yellow, "[fix] {s}: updated origin url to {s}", .{ r.name, r.url.? });
+            } else {
+                pr.line(ctx, .red, "[fix] {s}: failed to update origin url", .{r.name});
+            }
+        } else {
+            pr.line(ctx, .yellow, "[fix] {s}: url mismatch — run git -C {s} remote set-url origin {s}  (or doctor --fix --force to auto-fix)", .{ r.name, primary, r.url.? });
+        }
+    }
+
+    // 4. not-a-repo hint (and with --force, remove empty dirs)
+    for (cfg.repos) |*r| {
+        const primary = std.Io.Dir.path.join(ctx.alloc, &.{ cfg.paths.repos, r.name }) catch continue;
+        if (!git.dirExists(ctx, primary)) continue;
+        const gk = git.gitDirKind(ctx, primary) catch continue;
+        if (gk != .absent) continue;
+        if (fix_force) {
+            // Only delete if appears empty or only contains dotfiles? Conservative: check if dir is empty-ish
+            var is_empty = true;
+            if (std.Io.Dir.cwd().openDir(ctx.io, primary, .{ .iterate = true })) |d| {
+                var dir = d;
+                defer dir.close(ctx.io);
+                var it = dir.iterate();
+                if (it.next(ctx.io) catch null) |_| is_empty = false;
+            } else |_| {}
+            if (is_empty) {
+                std.Io.Dir.cwd().deleteTree(ctx.io, primary) catch {};
+                pr.line(ctx, .yellow, "[fix] removed empty not-a-repo dir {s}", .{primary});
+            } else {
+                pr.line(ctx, .yellow, "[fix] {s}: not-a-repo at {s} — not removing (non-empty). Run rm -rf {s} && fmr sync {s}", .{ r.name, primary, primary, r.name });
+            }
+        } else {
+            pr.line(ctx, .yellow, "[fix] {s}: not-a-repo at {s} — run rm -rf {s} && fmr sync {s}  (or doctor --fix --force to remove if empty)", .{ r.name, primary, primary, r.name });
+        }
     }
 }
 
@@ -219,14 +266,14 @@ fn repoChecks(ctx: *const process.Ctx, cfg: *const config.Config) ![]Check {
             continue;
         }
         if (gk == .absent) {
-            try checks.append(.{ .level = .problem, .msg = try std.fmt.allocPrint(ctx.alloc, "{s}: directory exists but is not a git repo", .{repo.name}) });
+            try checks.append(.{ .level = .problem, .msg = try std.fmt.allocPrint(ctx.alloc, "{s}: directory exists but is not a git repo (fix: rm -rf {s} && fmr sync {s})", .{ repo.name, primary, repo.name }) });
             continue;
         }
 
         if (repo.url) |u| {
             const actual = try git.remoteUrl(ctx, primary);
             if (actual == null or !std.mem.eql(u8, actual.?, u)) {
-                try checks.append(.{ .level = .problem, .msg = try std.fmt.allocPrint(ctx.alloc, "{s}: url mismatch (config {s}, origin {s})", .{ repo.name, u, actual orelse "<missing>" }) });
+                try checks.append(.{ .level = .problem, .msg = try std.fmt.allocPrint(ctx.alloc, "{s}: url mismatch (config {s}, origin {s}) — fix: git -C {s} remote set-url origin {s} or fmr sync --fix-origin", .{ repo.name, u, actual orelse "<missing>", primary, u }) });
             } else {
                 try checks.append(.{ .level = .ok, .msg = try std.fmt.allocPrint(ctx.alloc, "{s}: origin url matches config", .{repo.name}) });
             }
