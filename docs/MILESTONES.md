@@ -73,9 +73,33 @@ Fri 19:00–20:00  Buffer: `zig fmt --check`, full test matrix, demo GIF, RELEAS
 
 Each slice ends with `zig build test && zig build test-e2e && swift test --package-path app` green.
 
+## Milestone M3 — v0.4 GUI Polish & Help: “Make the next person smile”
+
+**Goal:** A stranger can open `Fmr.app` and feel guided. Help is in-app, empty states teach, errors fix with one click, and the app feels alive.
+
+**Deadline: Next sprint (6–7h, 5× S).** Milestone [#1](https://github.com/drawmeanelephant/fmr/milestone/1) on GitHub.
+
+| Issue | Title | Size | Owner |
+|---|---|---|---|
+| #30 | Welcome & Help — First-run guidance and in-app help | S | — |
+| #31 | Empty States & Delight — Every empty list has a CTA | S | — |
+| #32 | Visual Motion & Feedback — Alive, not static | S | — |
+| #33 | Remediation & Contextual Help — Errors that fix themselves | S | — |
+| #34 | Discoverability & About — Make the app findable | S | — |
+
+**Exit criteria:**
+- Fresh `UserDefaults` -> welcome sheet with 3 cards + Help > Fmr Help (⌘?) has 3 tabs (Overview/Shortcuts/Concepts).
+- Every empty state (sidebar, filtered, worktrees, doctor, palette) shows illustrated CTA; filtered empty has Clear Search; drop zone animates.
+- Menu bar icon changes shape with problems; `Last synced: 2m ago` updates without extra `fmr status`; placeholder skeleton on cold launch; transient Synced ✓ feedback.
+- Sync/doctor refusals show dismissible remediation banner with Copy fix (regex) + Fix button for url-mismatch; metric `ⓘ` popovers.
+- `Help` menu + palette footer show shortcuts; About + Settings have `Copy Debug Info`; a11y labels pass Inspector; `swift test --package-path app && zig build test` green.
+
+**Non-goals carried:**
+- No App Sandbox, no Fleet, no `rm -rf` of checkouts — `docs/ARCHITECTURE.md:64` invariants stay.
+
 ## How to use this doc
 
-- Every new issue (`docs/issues/issue-22-*.md` … `issue-29-*.md`) links here as Parent Plan.
+- Every new issue (`docs/issues/issue-22-*.md` … `issue-34-*.md`) links here as Parent Plan.
 - `docs/issues/README.md` is the index — this file is the timeline.
 - When an issue lands, update its row to `Closed (PR #X)` and check its acceptance criteria.
-- Tag `v0.2.0` after M1, `v0.3.0` after M2.
+- Tag `v0.2.0` after M1, `v0.3.0` after M2, `v0.4.0` after M3.

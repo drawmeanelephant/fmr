@@ -17,6 +17,17 @@ public struct SettingsView: View {
             Section("Paths") {
                 LabeledContent("Repos Root", value: model.reposRoot)
                 LabeledContent("Worktrees Root", value: model.worktreesRoot)
+                LabeledContent {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(model.relativeLastUpdated)
+                            .font(.caption)
+                    }
+                } label: {
+                    Text("Last Synced")
+                }
             }
             Section("About") {
                 Text("Fmr — Fix My Repository / Fuckin' Manage Repos.\nDeterministic, local-first workspace manager for Conductor + agents. No fleet, no cloud, no `reset --hard`.")

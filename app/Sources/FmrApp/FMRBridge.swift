@@ -9,6 +9,18 @@ public final class FMRBridge: Sendable {
         self.jsonDecoder = JSONDecoder()
     }
 
+    /// Mirrors src/main.zig:578 fallback: ~/config/fmr/workspace.json → ~/config/yard/workspace.json.
+    /// Do not hardcode the config path elsewhere; use this helper.
+    public func resolveConfigPath() -> String {
+        let home = NSHomeDirectory()
+        let fmrPath = "\(home)/config/fmr/workspace.json"
+        let yardPath = "\(home)/config/yard/workspace.json"
+        let fm = FileManager.default
+        if fm.fileExists(atPath: fmrPath) { return fmrPath }
+        if fm.fileExists(atPath: yardPath) { return yardPath }
+        return fmrPath
+    }
+
     /// Locates the `fmr` binary on the system.
     public func resolveBinaryPath() -> String {
         // 1. Check embedded bundle helper if running from an .app bundle

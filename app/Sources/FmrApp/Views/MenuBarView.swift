@@ -1,8 +1,10 @@
 import SwiftUI
+import AppKit
 
 public struct MenuBarView: View {
     @Bindable var model: WorkspaceViewModel
     @Environment(\.openWindow) private var openWindow
+    @State private var syncFeedback: String? = nil
 
     public init(model: WorkspaceViewModel) {
         self.model = model
@@ -17,6 +19,17 @@ public struct MenuBarView: View {
                     .foregroundStyle(.primary)
 
                 Spacer()
+
+                // #32: freshness in header
+                HStack(spacing: 4) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                    Text("Last synced: \(model.relativeLastUpdated)")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
 
                 if model.isRefreshing {
                     ProgressView()
@@ -36,7 +49,7 @@ public struct MenuBarView: View {
             .padding(.top, 10)
             .padding(.bottom, 6)
 
-            // Status Counters Pills
+            // Status Counters Pills — #32 animated
             HStack(spacing: 6) {
                 StatusPill(label: "\(model.cleanCount) Clean", color: .green)
                 if model.behindCount > 0 {
@@ -55,33 +68,41 @@ public struct MenuBarView: View {
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
+            .animation(.easeInOut(duration: 0.3), value: model.problemCount)
+            .animation(.easeInOut(duration: 0.3), value: model.behindCount)
+            .animation(.easeInOut(duration: 0.3), value: model.dirtyCount)
 
             Divider()
 
             // Repositories List
             ScrollView {
                 VStack(spacing: 2) {
-                    if model.repos.isEmpty {
-                        VStack(spacing: 8) {
-                            Text(model.isRefreshing ? "Loading repositories..." : "No repositories configured.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            if !model.isRefreshing {
-                                Button("Add Repository...") { model.isAddRepoPresented = true }
-                                    .controlSize(.small)
-                                Text("or drag a folder into the dashboard")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
+                    if model.isRefreshing && model.repos.isEmpty && !model.catalogLoaded {
+                        // #32 skeleton — cold launch only, not filtered empty
+                        MenuBarRedactedPlaceholderView()
+                            .transition(.opacity)
+                    } else if model.repos.isEmpty {
+                        EmptyStateView.noRepos(style: .compact, onAdd: {
+                            model.isAddRepoPresented = true
+                        }, onOpenWorkspace: {
+                            let path = model.resolvedConfigPath
+                            let url = URL(fileURLWithPath: path)
+                            if FileManager.default.fileExists(atPath: path) {
+                                NSWorkspace.shared.open(url)
+                            } else {
+                                NSWorkspace.shared.open(url.deletingLastPathComponent())
                             }
-                        }
-                        .padding(.vertical, 20)
+                        })
+                        .frame(maxHeight: 120)
                     } else {
                         ForEach(model.repos) { repo in
                             MenuBarRepoRow(repo: repo, model: model)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
                 }
                 .padding(.vertical, 4)
+                .animation(.spring(duration: 0.35), value: model.repos.map(\.id))
             }
             .frame(maxHeight: 280)
 
@@ -130,9 +151,24 @@ public struct MenuBarView: View {
                     }
                 }
 
+                // #32 transient sync feedback
+                if let syncFeedback {
+                    HStack(spacing: 4) {
+                        Image(systemName: syncFeedback.contains("refused") || syncFeedback.contains("failed") ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(syncFeedback.contains("refused") || syncFeedback.contains("failed") ? Color.orange : Color.green)
+                        Text(syncFeedback)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer()
+                    }
+                    .transition(.opacity)
+                }
+
                 HStack(spacing: 8) {
                     Button {
-                        model.syncAll()
+                        triggerSyncAll()
                     } label: {
                         Label("Sync All", systemImage: "arrow.triangle.2.circlepath")
                             .font(.caption)
@@ -176,6 +212,31 @@ public struct MenuBarView: View {
             .background(Color(NSColor.controlBackgroundColor))
         }
         .frame(width: 320)
+    }
+
+    private func triggerSyncAll() {
+        model.syncAll()
+        // Show transient feedback after sync completes (optimistic 2s window observing lastTaskOutput).
+        // We do not trigger extra fmr calls; just observe lastTaskOutput change.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            let output = model.lastTaskOutput
+            let feedback: String
+            if output.contains("refused") || output.contains("failed") {
+                // Compact preview per #32; full banner is #33.
+                let problems = model.problemCount
+                if problems > 0 {
+                    feedback = "\(problems) refused → see banner"
+                } else {
+                    feedback = "Sync finished with issues"
+                }
+            } else {
+                feedback = "Synced ✓"
+            }
+            withAnimation { syncFeedback = feedback }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                withAnimation { syncFeedback = nil }
+            }
+        }
     }
 }
 

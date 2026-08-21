@@ -180,26 +180,41 @@ public struct AddRepoSheet: View {
                 .foregroundStyle(.secondary)
 
             RoundedRectangle(cornerRadius: 8)
-                .fill(isTargeted ? Color.accentColor.opacity(0.15) : Color.clear)
+                .fill(isTargeted ? Color.accentColor.opacity(0.15) : (localDirectory != nil ? Color.green.opacity(0.12) : Color.clear))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5]))
-                        .foregroundStyle(isTargeted ? Color.accentColor : Color.secondary.opacity(0.5))
+                        .foregroundStyle(isTargeted ? Color.accentColor : (localDirectory != nil ? Color.green : Color.secondary.opacity(0.5)))
                 )
                 .frame(height: 64)
+                .scaleEffect(isTargeted ? 1.02 : 1.0)
+                .animation(.easeInOut(duration: 0.2), value: isTargeted)
                 .overlay {
                     VStack(spacing: 4) {
-                        Image(systemName: "folder.badge.plus")
-                            .font(.title2)
                         if let localDirectory {
-                            Text(localDirectory.path)
-                                .font(.caption2)
-                                .lineLimit(1)
-                                .padding(.horizontal, 8)
+                            HStack(spacing: 6) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(.green)
+                                Text(localDirectory.path)
+                                    .font(.caption2)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 8)
+                            }
                         } else {
-                            Text("Drop folder here")
+                            Image(systemName: isTargeted ? "folder.badge.plus.fill" : "folder.badge.plus")
+                                .font(.title2)
+                                .foregroundStyle(isTargeted ? Color.accentColor : Color.secondary)
+                                .scaleEffect(isTargeted ? 1.15 : 1.0)
+                                .animation(.easeInOut(duration: 0.2), value: isTargeted)
+                            Text(isTargeted ? "Drop to add" : "Drop folder here")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(isTargeted ? Color.accentColor : Color.secondary)
+                            if isTargeted {
+                                Image(systemName: "checkmark.circle")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }

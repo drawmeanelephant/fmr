@@ -45,6 +45,34 @@ public final class WorkspaceViewModel: @unchecked Sendable {
     public var searchQuery: String = ""
     public var selectedFilter: RepoFilter = .all
     public var lastUpdated: Date? = nil
+    private var freshnessTimer: Timer?
+    /// Tick incremented every 30s to force SwiftUI re-render of `relativeLastUpdated` without extra `fmr` calls.
+    /// Needed because `@Observable` (Observation) has no `objectWillChange`; mutating any `@Observable` var triggers update.
+    private var freshnessTick: Int = 0
+
+    /// Humanized freshness string for "Last synced: X". Updates every 30s via `freshnessTimer`.
+    /// When `lastUpdated == nil` (never synced) returns "never" per #32.
+    public var relativeLastUpdated: String {
+        _ = freshnessTick // track tick for Observation invalidation
+        guard let lastUpdated else { return "never" }
+        let interval = Date().timeIntervalSince(lastUpdated)
+        if interval < 60 { return "just now" }
+        if interval < 3600 {
+            let m = Int(interval / 60)
+            return "\(m)m ago"
+        }
+        if interval < 86400 {
+            let comps = Calendar.current.dateComponents([.hour], from: lastUpdated, to: Date())
+            let h = comps.hour ?? 1
+            return "\(h)h ago"
+        }
+        let fmt = RelativeDateTimeFormatter()
+        fmt.unitsStyle = .abbreviated
+        return fmt.localizedString(for: lastUpdated, relativeTo: Date())
+    }
+
+    /// More precise relative string using `RelativeDateTimeFormatter` for >24h; kept for tests.
+    public func formattedRelativeLastUpdated() -> String { relativeLastUpdated }
 
     // Catalog metadata loaded from `fmr config --json` (paths, commands, kinds).
     public var configPaths: ConfigPaths? = nil
@@ -59,6 +87,54 @@ public final class WorkspaceViewModel: @unchecked Sendable {
     private var timer: Timer?
     private static let recentReposKey = "fmr.recentRepos.v1"
     private static let recentReposLimit = 10
+    private static let hasSeenWelcomeKey = "fmr.hasSeenWelcome.v1"
+
+    /// Whether the welcome sheet has been dismissed permanently.
+    public var hasSeenWelcome: Bool {
+        get { defaults.bool(forKey: Self.hasSeenWelcomeKey) }
+        set { defaults.set(newValue, forKey: Self.hasSeenWelcomeKey) }
+    }
+
+    /// Guards previews and tests from showing the welcome sheet.
+    private var isPreview: Bool {
+        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != nil { return true }
+        // XCTest injects this env var; also fallback to class check for unit tests.
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil { return true }
+        if NSClassFromString("XCTestCase") != nil { return true }
+        return false
+    }
+
+    /// True when the welcome sheet should be shown automatically on launch.
+    public var shouldShowWelcome: Bool {
+        if isPreview { return false }
+        return repos.isEmpty && catalogLoaded && !isRefreshing && !hasSeenWelcome
+    }
+
+    /// Transient override so Help > Welcome always forces the sheet even after
+    /// hasSeenWelcome is true or repos is non-empty. Reset after presentation.
+    public var isWelcomeForced: Bool = false
+
+    public func markWelcomeSeen() {
+        hasSeenWelcome = true
+    }
+
+    public func resetWelcome() {
+        defaults.removeObject(forKey: Self.hasSeenWelcomeKey)
+    }
+
+    public func forceShowWelcome() {
+        isWelcomeForced = true
+    }
+
+    public func clearForcedWelcome() {
+        isWelcomeForced = false
+    }
+
+    /// Resolve the workspace.json path using the same fallback as
+    /// src/main.zig:578 (~/config/fmr/workspace.json → ~/config/yard/workspace.json).
+    public var resolvedConfigPath: String {
+        bridge.resolveConfigPath()
+    }
 
     public init(bridge: FMRBridge = .shared, defaults: UserDefaults = .standard) {
         self.bridge = bridge
@@ -161,11 +237,26 @@ public final class WorkspaceViewModel: @unchecked Sendable {
                 self?.refresh(silent: true)
             }
         }
+        // #32: freshness timer — re-renders `relativeLastUpdated` every 30s without extra fmr calls.
+        // `objectWillChange` is for ObservableObject; @Observable uses mutation tracking, so we bump `freshnessTick`.
+        freshnessTimer?.invalidate()
+        freshnessTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.freshnessTick += 1
+            }
+        }
     }
 
     public func stopAutoRefresh() {
         timer?.invalidate()
         timer = nil
+        freshnessTimer?.invalidate()
+        freshnessTimer = nil
+    }
+
+    deinit {
+        timer?.invalidate()
+        freshnessTimer?.invalidate()
     }
 
     // MARK: - Computed Properties
