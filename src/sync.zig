@@ -23,12 +23,16 @@ pub const Outcome = struct {
 
 const fetch_timeout_ns = 10 * 60 * std.time.ns_per_s;
 
-pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []const u8, jobs: usize, json_out: bool, pr: *ui.Printer) u8 {
+pub fn run(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []const u8, jobs: usize, json_out: bool, pr: *ui.Printer, fix_origin: bool) u8 {
+    return runWithFix(ctx, cfg, names, jobs, json_out, pr, fix_origin);
+}
+
+fn runWithFix(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []const u8, jobs: usize, json_out: bool, pr: *ui.Printer, fix_origin: bool) u8 {
     var arenas = ArrayList(*std.heap.ArenaAllocator).init(ctx.alloc);
     defer for (arenas.items) |a| a.deinit();
     var max_exit: u8 = 0;
     var counts = [4]usize{ 0, 0, 0, 0 };
-    const results = syncAll(ctx, cfg, names, jobs, &arenas) catch {
+    const results = syncAll(ctx, cfg, names, jobs, &arenas, fix_origin) catch {
         process.stderrLineNewline(ctx, "fmr sync: internal error", .{});
         return 1;
     };
@@ -116,6 +120,7 @@ const WorkerState = struct {
     outcomes: []Outcome,
     atomic_idx: *std.atomic.Value(usize),
     arena: *std.heap.ArenaAllocator,
+    fix_origin: bool,
 };
 
 fn worker(ws: *WorkerState) void {
@@ -138,7 +143,7 @@ fn worker(ws: *WorkerState) void {
             };
             continue;
         }
-        ws.outcomes[idx] = syncOne(&thread_ctx, ws.cfg, repo.?, alloc) catch Outcome{
+        ws.outcomes[idx] = syncOne(&thread_ctx, ws.cfg, repo.?, alloc, ws.fix_origin) catch Outcome{
             .result = .failed,
             .line = std.fmt.allocPrint(alloc, "[fail] {s} - internal error", .{repo.?.name}) catch "internal error",
             .details = &.{},
@@ -147,7 +152,7 @@ fn worker(ws: *WorkerState) void {
     }
 }
 
-fn syncAll(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []const u8, jobs: usize, arenas: *ArrayList(*std.heap.ArenaAllocator)) ![]Outcome {
+fn syncAll(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []const u8, jobs: usize, arenas: *ArrayList(*std.heap.ArenaAllocator), fix_origin: bool) ![]Outcome {
     const n = names.len;
     const outcomes = try ctx.alloc.alloc(Outcome, n);
     if (n == 0) return outcomes;
@@ -167,6 +172,7 @@ fn syncAll(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []
             .outcomes = outcomes,
             .atomic_idx = &atomic_idx,
             .arena = arena,
+            .fix_origin = fix_origin,
         };
         threads[i] = try std.Thread.spawn(.{}, worker, .{ws});
     }
@@ -174,7 +180,7 @@ fn syncAll(ctx: *const process.Ctx, cfg: *const config.Config, names: []const []
     return outcomes;
 }
 
-fn syncOne(ctx: *const process.Ctx, cfg: *const config.Config, repo: *const config.Repo, alloc: std.mem.Allocator) !Outcome {
+fn syncOne(ctx: *const process.Ctx, cfg: *const config.Config, repo: *const config.Repo, alloc: std.mem.Allocator, fix_origin: bool) !Outcome {
     const primary = try std.Io.Dir.path.join(alloc, &.{ cfg.paths.repos, repo.name });
     if (!repo.sync_enabled) {
         return Outcome{ .result = .skipped, .line = try std.fmt.allocPrint(alloc, "[skip] {s} - paused (sync disabled)", .{repo.name}), .details = &.{}, .exit = 0, .action = "skip" };
@@ -228,14 +234,32 @@ fn syncOne(ctx: *const process.Ctx, cfg: *const config.Config, repo: *const conf
     const actual_url = try git.remoteUrl(ctx, primary);
     if (repo.url) |u| {
         if (actual_url == null or !std.mem.eql(u8, actual_url.?, u)) {
-            var det = ArrayList([]const u8).init(alloc);
-            det.append(std.fmt.allocPrint(alloc, "fix config or run: git -C {s} remote set-url origin {s}", .{ primary, u }) catch "") catch {};
-            return Outcome{
-                .result = .refused,
-                .line = try std.fmt.allocPrint(alloc, "[refuse] {s} - url mismatch (config {s}, origin {s})", .{ repo.name, u, actual_url orelse "<missing>" }),
-                .details = det.items,
-                .exit = 3,
-            };
+            if (fix_origin) {
+                const res = try process.run(ctx, &.{ "git", "-C", primary, "remote", "set-url", "origin", u }, .{});
+                if (res.ok()) {
+                    process.stderrLineNewline(ctx, "[fix] {s}: updated origin url to {s}", .{ repo.name, u });
+                } else {
+                    var det2 = ArrayList([]const u8).init(alloc);
+                    det2.append(std.fmt.allocPrint(alloc, "auto-fix failed: git remote set-url exit {s}", .{res.stderr}) catch "") catch {};
+                    det2.append(std.fmt.allocPrint(alloc, "fix config or run: git -C {s} remote set-url origin {s}", .{ primary, u }) catch "") catch {};
+                    return Outcome{
+                        .result = .refused,
+                        .line = try std.fmt.allocPrint(alloc, "[refuse] {s} - url mismatch (config {s}, origin {s})", .{ repo.name, u, actual_url orelse "<missing>" }),
+                        .details = det2.items,
+                        .exit = 3,
+                    };
+                }
+            } else {
+                var det = ArrayList([]const u8).init(alloc);
+                det.append(std.fmt.allocPrint(alloc, "fix config or run: git -C {s} remote set-url origin {s}", .{ primary, u }) catch "") catch {};
+                det.append("or re-run with --fix-origin to auto-fix") catch {};
+                return Outcome{
+                    .result = .refused,
+                    .line = try std.fmt.allocPrint(alloc, "[refuse] {s} - url mismatch (config {s}, origin {s})", .{ repo.name, u, actual_url orelse "<missing>" }),
+                    .details = det.items,
+                    .exit = 3,
+                };
+            }
         }
     }
 

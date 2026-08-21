@@ -62,10 +62,19 @@ public struct MenuBarView: View {
             ScrollView {
                 VStack(spacing: 2) {
                     if model.repos.isEmpty {
-                        Text(model.isRefreshing ? "Loading repositories..." : "No repositories configured.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 20)
+                        VStack(spacing: 8) {
+                            Text(model.isRefreshing ? "Loading repositories..." : "No repositories configured.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if !model.isRefreshing {
+                                Button("Add Repository...") { model.isAddRepoPresented = true }
+                                    .controlSize(.small)
+                                Text("or drag a folder into the dashboard")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .padding(.vertical, 20)
                     } else {
                         ForEach(model.repos) { repo in
                             MenuBarRepoRow(repo: repo, model: model)

@@ -4,11 +4,13 @@ This directory contains standalone, self-contained task specifications for imple
 
 Each issue is formatted with clear **Context**, **CLI Signatures**, **Architectural Guardrails**, **Files to Touch**, and **Acceptance Criteria**, making them directly feedable to AI coding assistants (Claude Code, Antigravity, Cursor, etc.).
 
+> Timeline: [`docs/MILESTONES.md`](../MILESTONES.md) — M1 v0.2 Ship (Thu night → Fri noon) + M2 v0.3 Personal (Fri noon → Fri 20:00). **Done by EOD Fri Aug 22, 2026.**
+
 ---
 
 ## Issue Index
 
-## Core CLI Engine Roadmap
+## Core CLI Engine Roadmap — Shipped
 
 | Issue | Slice | Title | Spec Document | Status |
 |---|---|---|---|---|
@@ -19,7 +21,7 @@ Each issue is formatted with clear **Context**, **CLI Signatures**, **Architectu
 
 ---
 
-## Native macOS Swift App Roadmap
+## Native macOS Swift App Roadmap — Shipped
 
 | Issue | Slice | Title | Spec Document | Status |
 |---|---|---|---|---|
@@ -28,23 +30,47 @@ Each issue is formatted with clear **Context**, **CLI Signatures**, **Architectu
 | **#7** | GUI-3 | Full Workspace Dashboard Window (`WorkspaceDashboardView`) | [`issue-07-gui-3-workspace-dashboard.md`](./issue-07-gui-3-workspace-dashboard.md) | Closed (PR #12) |
 | **#8** | GUI-4 | Diagnostics Sheet, App Packaging (`scripts/build_app.sh`), & Polish | [`issue-08-gui-4-diagnostics-and-packaging.md`](./issue-08-gui-4-diagnostics-and-packaging.md) | Closed (PR #12) |
 | **#13** | GUI-5 | Worktree Operations, Editor Launchers, & Extended Models | [`issue-09-gui-5-worktree-management-and-extended-models.md`](./issue-09-gui-5-worktree-management-and-extended-models.md) | Closed (PR #14) |
-| **#15** | GUI-6 | Repository Onboarding: `fmr add`, Native GUI Import Sheet & Drag-and-Drop | [`issue-10-repo-management-and-import.md`](./issue-10-repo-management-and-import.md) | Ready |
+| **#15** | GUI-6 | Repository Onboarding: `fmr add`, Native GUI Import Sheet & Drag-and-Drop | [`issue-10-repo-management-and-import.md`](./issue-10-repo-management-and-import.md) | Closed (PR #23) |
 
 ---
 
-## Backlog (reviewed, not yet started)
+## Polish & Backlog — Shipped (were “backlog” in stale README)
 
-| Issue | Area | Title | Spec Document |
-|---|---|---|---|
-| **#16** | Core CLI | `fmr run --json` structured completion | [`issue-16-fmr-run-json.md`](./issue-16-fmr-run-json.md) |
-| **#17** | GUI | Wire `fmr config --json` into the app (kind filters, custom commands, paths) | [`issue-17-gui-config-catalog.md`](./issue-17-gui-config-catalog.md) |
-| **#18** | CI | Build & test the Swift app in GitHub Actions | [`issue-18-ci-swift-app.md`](./issue-18-ci-swift-app.md) |
-| **#19** | Packaging | `build_app.sh` LSUIElement, codesigning, & versioning | [`issue-19-gui-packaging-polish.md`](./issue-19-gui-packaging-polish.md) |
-| **#20** | GUI | Harden worktree create/remove edge cases | [`issue-20-gui-worktree-hardening.md`](./issue-20-gui-worktree-hardening.md) |
-| **#21** | Docs | Consolidate GUI docs & fix stale references | [`issue-21-docs-consolidation.md`](./issue-21-docs-consolidation.md) |
+| Issue | Area | Title | Spec Document | Status |
+|---|---|---|---|---|
+| **#16** | Core CLI | `fmr run --json` structured completion | [`issue-16-fmr-run-json.md`](./issue-16-fmr-run-json.md) | Closed (PR #17 `d329f73`) |
+| **#17** | GUI | Wire `fmr config --json` into the app (kind filters, custom commands, paths) | [`issue-17-gui-config-catalog.md`](./issue-17-gui-config-catalog.md) | Closed (PR #18 `5eedadc`) |
+| **#18** | CI | Build & test the Swift app in GitHub Actions | [`issue-18-ci-swift-app.md`](./issue-18-ci-swift-app.md) | Closed (PR #19 `a6c05c0`) |
+| **#19** | Packaging | `build_app.sh` LSUIElement, codesigning, & versioning | [`issue-19-gui-packaging-polish.md`](./issue-19-gui-packaging-polish.md) | Closed (PR #20 `0de49de`) |
+| **#20** | GUI | Harden worktree create/remove edge cases | [`issue-20-gui-worktree-hardening.md`](./issue-20-gui-worktree-hardening.md) | Closed (PR #21 `93b67f4`) |
+| **#21** | Docs | Consolidate GUI docs & fix stale references | [`issue-21-docs-consolidation.md`](./issue-21-docs-consolidation.md) | Closed (PR #22 `dafeead`) |
+| — | — | Recent repos, palette recents, clone-and-open | — | Closed (PR #24 `e0a88df`, #25 `f1a2780`, #26 `c03066c`) |
 
-> The authoritative `--json` contract lives in [`docs/gui/json-contract.md`](../gui/json-contract.md) —
-> issue specs point there rather than re-specifying field shapes.
+> The authoritative `--json` contract lives in [`docs/gui/json-contract.md`](../gui/json-contract.md) — issue specs point there rather than re-specifying field shapes.
+
+---
+
+## Milestones — Active (M1 + M2, EOD Fri Aug 22)
+
+### M1 v0.2 Ship — “It Actually Works” (Thu night → Fri 12:00)
+
+| Issue | Title | Spec Document | Size | Status |
+|---|---|---|---|---|
+| **#22** | Docs & Version Truth | [`issue-22-docs-and-version-truth.md`](./issue-22-docs-and-version-truth.md) | S | Closed (whirrrr) |
+| **#23** | CLI DX — Completions + `fmr open` + `fmr list` | [`issue-23-cli-dx-completions-open-list.md`](./issue-23-cli-dx-completions-open-list.md) | M | Closed (whirrrr) |
+| **#24** | Doctor & Sync UX — url-mismatch / not-a-repo | [`issue-24-doctor-and-sync-ux.md`](./issue-24-doctor-and-sync-ux.md) | S | Closed (whirrrr) |
+| **#25** | GUI Menubar Polish — notifications, About, empty states | [`issue-25-gui-menubar-polish.md`](./issue-25-gui-menubar-polish.md) | S | Closed (whirrrr) |
+
+### M2 v0.3 Personal — “Better Than T3 *For Me*” (Fri 12:00 → Fri 20:00)
+
+| Issue | Title | Spec Document | Size | Status |
+|---|---|---|---|---|
+| **#26** | `fmr context` — AI-ready workspace dump | [`issue-26-fmr-context.md`](./issue-26-fmr-context.md) | S | Closed (whirrrr) |
+| **#27** | `fmr grep` — cross-repo ripgrep | [`issue-27-fmr-grep.md`](./issue-27-fmr-grep.md) | S | Closed (whirrrr) |
+| **#28** | `fmr mcp` — MCP server for Claude/Cursor | [`issue-28-fmr-mcp.md`](./issue-28-fmr-mcp.md) | M | Closed (whirrrr) |
+| **#29** | `fmr daemon` — optional launchd auto-sync | [`issue-29-fmr-daemon.md`](./issue-29-fmr-daemon.md) | S | Closed (whirrrr) |
+
+Detailed timeline, exit criteria, and non-goals: [`docs/MILESTONES.md`](../MILESTONES.md).
 
 ---
 
@@ -52,7 +78,8 @@ Each issue is formatted with clear **Context**, **CLI Signatures**, **Architectu
 
 To feed an issue to Claude Code or an agent:
 ```text
-Read docs/issues/issue-01-slice-1-named-commands.md and implement the requested features.
+Read docs/issues/issue-22-docs-and-version-truth.md and docs/MILESTONES.md and implement the requested features.
 Follow the exact CLI signature, exit codes, sequential execution policy, and acceptance criteria.
 Run `zig fmt --check src/*.zig build.zig`, `zig build test`, and `zig build test-e2e` to verify your solution.
 ```
+For M2 issues, also read `docs/gui/json-contract.md` for the JSON shape to extend.

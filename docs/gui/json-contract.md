@@ -229,6 +229,56 @@ app never parses `workspace.json`: paths, parallelism, and every repo with its
 
 No `repos` array. Model this as a separate type if the app surfaces GC.
 
+## 9. `fmr list --json` (instant, config-only)
+
+```json
+{ "version": 1, "command": "list", "exit": 0, "repos": [
+  {"name": "boris", "kind": "zig", "path": "/Users/.../boris", "url": "git@..."}
+]}
+```
+
+Filtered by `--kind zig` when given. No git I/O, no locks.
+
+## 10. `fmr context --json` (AI dump)
+
+```json
+{
+  "version": 1, "command": "context", "exit": 0,
+  "repos": [{
+    "name": "boris", "kind": "zig", "path": "...", "url": "...",
+    "branch": "afterparty", "head": "a50aa15", "head_full": "a50aa15...",
+    "default_branch": "afterparty", "ahead": 0, "behind": 0,
+    "dirty_tracked": 0, "untracked": 0, "snap": "none", "sessions": 0,
+    "worktrees": [" /path sess branch head"], "commits": ["a50aa15 msg"],
+    "check": ["zig","build","test"], "commands": ["serve"], "rag_mode": "command"
+  }]
+}
+```
+
+Human mode (no `--json`) prints markdown per repo. `--commits N` (default 3, max 10) controls log depth.
+
+## 11. `fmr grep --json`
+
+```json
+{ "version": 1, "command": "grep", "exit": 0, "pattern": "TODO", "hits": [
+  {"repo":"boris","file":"src/main.zig","line":17,"col":4,"text":"// TODO"}
+]}
+```
+
+`exit` 0 = hit, 1 = no hit, 2 = error (mirrors `rg`). `--kind` filters repos. Human mode prints `repo:file:line:col:text`.
+
+## 12. `fmr daemon status --json`
+
+```json
+{ "version": 1, "command": "daemon", "exit": 0, "installed": true, "interval": "10m", "interval_sec": 600, "plist": "/Users/.../LaunchAgents/com.drawmeanelephant.fmr.sync.plist" }
+```
+
+`install`/`uninstall` write/remove the plist and print human `[ok]` lines (no `--json` for mutate).
+
+## 13. `fmr mcp` (stdio JSON-RPC)
+
+Not a `--json` command — speaks MCP over stdin/stdout. `initialize` → `tools/list` → `tools/call`. See `src/mcp.zig:30`. GUI/CLI never parse this as `--json`.
+
 ## Integration notes for the bridge
 
 1. **Invocation**: `fmr <subcommand> [repo...] --json`. For repo-targeted ops

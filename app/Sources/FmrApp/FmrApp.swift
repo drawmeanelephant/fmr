@@ -23,6 +23,18 @@ struct FmrApp: App {
                 .frame(minWidth: 800, minHeight: 520)
         }
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Fmr") {
+                    NSApp.orderFrontStandardAboutPanel(
+                        options: [
+                            .applicationName: "Fmr",
+                            .applicationVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.2.0",
+                            .version: Bundle.main.infoDictionary?["FMRCoreVersion"] as? String ?? "0.2.0",
+                            .credits: NSAttributedString(string: "Fix My Repository — deterministic workspace manager.\nCore: fmr \(Bundle.main.infoDictionary?["FMRCoreVersion"] as? String ?? "0.2.0")"),
+                        ]
+                    )
+                }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("Refresh Status") {
                     model.refresh()
@@ -41,12 +53,20 @@ struct FmrApp: App {
 
                 Divider()
 
+                Button("Add Repository...") {
+                    model.isAddRepoPresented = true
+                }
+                .keyboardShortcut("n", modifiers: .command)
+
                 Button("Clone & Open Recent Repository...") {
                     model.paletteFilter = .recents
                     model.isCommandPalettePresented = true
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
             }
+        }
+        Settings {
+            SettingsView(model: model)
         }
     }
 }

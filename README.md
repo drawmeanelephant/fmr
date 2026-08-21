@@ -242,12 +242,17 @@ Runs 35 automated scenario suites (120+ assertions) against real temporary git f
 - [x] **Slice 2**: RAG snapshot pipeline (`fmr rag`), SHA snapshot directories, atomic symlink swap (`current`), command and files glob exporters.
 - [x] **Slice 3**: Complete 13-repository catalog definition (`config/workspace.example.json`), multi-kind defaults, and backward compatibility.
 - [x] **Slice 4**: Remediation suite (`fmr doctor --fix`), snapshot retention GC (`fmr rag --gc <n>`), and universal structured machine output (`--json`).
+- [x] **GUI 1–6**: Swift menu-bar + dashboard, `FMRBridge`, worktree create/remove, editor launchers, Cmd+K palette, `fmr add/remove` + import sheet, recents, packaging (`LSUIElement`, codesign, `--version`).
+- [x] **M1 v0.2 Ship** (by Fri noon): Docs & version truth (#22), CLI DX completions/open/list (#23), doctor/sync UX (#24), GUI menubar polish (#25) — [`docs/MILESTONES.md`](docs/MILESTONES.md).
+- [x] **M2 v0.3 Personal** (by Fri 20:00): `fmr context` (#26), `fmr grep` (#27), `fmr mcp` (#28), `fmr daemon` (#29) — better than T3 *for you*. **Shipped 0.2.0 whirrrr**
 
 ---
 
 ## 8. Further Reading
 
+- [`docs/MILESTONES.md`](docs/MILESTONES.md) — ship plan for M1 v0.2 + M2 v0.3 (done by EOD Fri Aug 22).
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — module map, data flow, safety invariants, JSON output shape, and test strategy for contributors.
 - [`docs/issues/`](docs/issues/) — the slice-by-slice issue specifications that drove each implementation.
+- [`docs/gui/json-contract.md`](docs/gui/json-contract.md) — verified `--json` contract (ground truth for bridge/MCP).
 - [`yard-plan.md`](yard-plan.md) — the original scope document (v0.1 draft) this project was built from.
 
