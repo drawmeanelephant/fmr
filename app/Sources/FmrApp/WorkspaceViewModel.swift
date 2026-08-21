@@ -50,6 +50,93 @@ public final class WorkspaceViewModel: @unchecked Sendable {
     /// Needed because `@Observable` (Observation) has no `objectWillChange`; mutating any `@Observable` var triggers update.
     private var freshnessTick: Int = 0
 
+    // MARK: - Remediation (#33)
+
+    public var lastSyncOutcomes: [SyncOutcome] = []
+    public var showRemediationBanner: Bool = false
+    public var remediationMessage: String = ""
+    private static let dismissedRemediationIdKey = "fmr.dismissedRemediationId"
+
+    public var remediationFixCommand: String? {
+        RemediationHelper.extractFixCommand(from: remediationMessage)
+    }
+
+    public func remediationId(for message: String) -> String {
+        // Stable id — use the message itself (truncated to 500 chars to avoid huge defaults).
+        // Hasher is randomized per launch, so not suitable for persistence.
+        if message.count > 500 { return String(message.prefix(500)) }
+        return message
+    }
+
+    @MainActor
+    public func dismissRemediationBanner() {
+        let id = remediationId(for: remediationMessage)
+        defaults.set(id, forKey: Self.dismissedRemediationIdKey)
+        showRemediationBanner = false
+    }
+
+    public func copyFixCommand(from message: String) -> String? {
+        RemediationHelper.extractFixCommand(from: message)
+    }
+
+    /// Returns the repo name from a doctor message if it matches a known repo/catalog entry.
+    public func doctorFixableRepoName(from message: String) -> String? {
+        // Doctor messages are "<repo>: ..." — extract prefix before colon.
+        guard let colon = message.firstIndex(of: ":") else { return nil }
+        let raw = String(message[..<colon]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
+        if repos.contains(where: { $0.name == raw }) { return raw }
+        if worktreesByRepo[raw] != nil { return raw }
+        if catalog[raw] != nil { return raw }
+        return nil
+    }
+
+    public func isUrlMismatchMessage(_ message: String) -> Bool {
+        message.localizedCaseInsensitiveContains("url mismatch")
+    }
+
+    public func isNotARepoMessage(_ message: String) -> Bool {
+        message.localizedCaseInsensitiveContains("not a git repo") || message.localizedCaseInsensitiveContains("not_a_repo")
+    }
+
+    @MainActor
+    private func updateRemediationBanner(with outcomes: [SyncOutcome]) {
+        lastSyncOutcomes = outcomes
+        guard let failing = outcomes.first(where: { $0.result == "refused" || $0.result == "failed" }) else {
+            showRemediationBanner = false
+            remediationMessage = ""
+            return
+        }
+        let msg = failing.message
+        let id = remediationId(for: msg)
+        let dismissedId = defaults.string(forKey: Self.dismissedRemediationIdKey)
+        if dismissedId == id {
+            showRemediationBanner = false
+            remediationMessage = msg
+            return
+        }
+        remediationMessage = msg
+        showRemediationBanner = true
+    }
+
+    /// Attempt to fix a url-mismatch via `fmr sync <repo> --fix-origin`.
+    public func fixUrlMismatch(for repoName: String) {
+        guard doctorFixableRepoName(from: "\(repoName): dummy") != nil || repos.contains(where: { $0.name == repoName }) || catalog[repoName] != nil else { return }
+        Task {
+            do {
+                _ = try await self.bridge.execute(arguments: ["sync", repoName, "--fix-origin"])
+                await MainActor.run {
+                    self.runDoctor(fix: false)
+                    self.refresh(silent: true)
+                }
+            } catch {
+                await MainActor.run {
+                    self.lastTaskOutput = "Fix failed: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
     /// Humanized freshness string for "Last synced: X". Updates every 30s via `freshnessTimer`.
     /// When `lastUpdated == nil` (never synced) returns "never" per #32.
     public var relativeLastUpdated: String {
@@ -330,6 +417,10 @@ public final class WorkspaceViewModel: @unchecked Sendable {
     public func syncAll() {
         runTask(description: "Syncing All Repositories...") {
             let res: SyncResponse = try await self.bridge.run(["sync", "--all"])
+            // Store outcomes + banner on main
+            await MainActor.run {
+                self.updateRemediationBanner(with: res.repos)
+            }
             let summary = "Sync complete: \(res.summary.ok) ok, \(res.summary.refused) refused, \(res.summary.failed) failed."
             if res.summary.refused > 0 || res.summary.failed > 0 {
                 self.notify(title: "fmr sync", body: summary)
@@ -342,6 +433,9 @@ public final class WorkspaceViewModel: @unchecked Sendable {
     public func syncRepo(name: String) {
         runTask(description: "Syncing \(name)...") {
             let res: SyncResponse = try await self.bridge.run(["sync", name])
+            await MainActor.run {
+                self.updateRemediationBanner(with: res.repos)
+            }
             let msg = res.repos.first?.message ?? "Done"
             if res.summary.refused > 0 || res.summary.failed > 0 {
                 self.notify(title: "fmr sync: \(name)", body: msg)

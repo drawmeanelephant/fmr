@@ -254,6 +254,9 @@ struct StatusPill: View {
             .background(color.opacity(0.15))
             .foregroundStyle(color)
             .clipShape(Capsule())
+            .accessibilityLabel(label)
+            .accessibilityHint("Status count")
+            .accessibilityAddTraits(.isStaticText)
     }
 }
 
@@ -331,79 +334,108 @@ struct MenuBarRepoRow: View {
     let model: WorkspaceViewModel
     @State private var isHovering = false
 
+    private var syncOutcome: SyncOutcome? {
+        model.lastSyncOutcomes.first(where: { $0.name == repo.name && ($0.result == "refused" || $0.result == "failed") })
+    }
+
+    private var a11yLabel: String {
+        var parts = [repo.name]
+        if repo.state != "ok" { parts.append("state \(repo.state)") }
+        if repo.behind > 0 { parts.append("behind \(repo.behind)") }
+        if repo.ahead > 0 { parts.append("ahead \(repo.ahead)") }
+        if repo.dirtyTracked > 0 { parts.append("dirty \(repo.dirtyTracked)") }
+        if repo.untracked > 0 { parts.append("untracked \(repo.untracked)") }
+        let snap = repo.snap == "ok" ? "snap ok" : (repo.snap == "stale" ? "snap stale" : "")
+        if !snap.isEmpty { parts.append(snap) }
+        return parts.joined(separator: ", ")
+    }
+
     var body: some View {
-        HStack(spacing: 6) {
-            // Status indicator dot
-            Circle()
-                .fill(statusColor)
-                .frame(width: 7, height: 7)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                // Status indicator dot — a11y
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 7, height: 7)
+                    .accessibilityLabel(a11yLabel)
+                    .accessibilityHint("Repository \(repo.name) status")
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(repo.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(repo.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.primary)
 
-                HStack(spacing: 4) {
-                    Text(repo.branch.isEmpty ? "default" : repo.branch)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-
-                    if repo.behind > 0 {
-                        Text("↓\(repo.behind)")
-                            .font(.caption2)
-                            .foregroundStyle(.yellow)
-                    }
-                    if repo.ahead > 0 {
-                        Text("↑\(repo.ahead)")
-                            .font(.caption2)
-                            .foregroundStyle(.blue)
-                    }
-                    if repo.dirtyTracked > 0 {
-                        Text("● \(repo.dirtyTracked)")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    }
-                    if repo.untracked > 0 {
-                        Text("+\(repo.untracked)")
+                    HStack(spacing: 4) {
+                        Text(repo.branch.isEmpty ? "default" : repo.branch)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+
+                        if repo.behind > 0 {
+                            Text("↓\(repo.behind)")
+                                .font(.caption2)
+                                .foregroundStyle(.yellow)
+                        }
+                        if repo.ahead > 0 {
+                            Text("↑\(repo.ahead)")
+                                .font(.caption2)
+                                .foregroundStyle(.blue)
+                        }
+                        if repo.dirtyTracked > 0 {
+                            Text("● \(repo.dirtyTracked)")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                        if repo.untracked > 0 {
+                            Text("+\(repo.untracked)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                }
+
+                Spacer()
+
+                if isHovering {
+                    HStack(spacing: 4) {
+                        Button {
+                            model.syncRepo(name: repo.name)
+                        } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.caption2)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Sync \(repo.name)")
+
+                        Button {
+                            model.ragRepo(name: repo.name)
+                        } label: {
+                            Image(systemName: "camera")
+                                .font(.caption2)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Take RAG Snapshot")
+                    }
+                } else {
+                    Text(repo.snap == "ok" ? "snap ok" : (repo.snap == "stale" ? "snap stale" : ""))
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
                 }
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(isHovering ? Color(NSColor.selectedControlColor).opacity(0.1) : Color.clear)
+            .cornerRadius(4)
+            .onHover { isHovering = $0 }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(a11yLabel)
+            .accessibilityHint("Double click to select, hover for actions")
 
-            Spacer()
-
-            if isHovering {
-                HStack(spacing: 4) {
-                    Button {
-                        model.syncRepo(name: repo.name)
-                    } label: {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.caption2)
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Sync \(repo.name)")
-
-                    Button {
-                        model.ragRepo(name: repo.name)
-                    } label: {
-                        Image(systemName: "camera")
-                            .font(.caption2)
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Take RAG Snapshot")
-                }
-            } else {
-                Text(repo.snap == "ok" ? "snap ok" : (repo.snap == "stale" ? "snap stale" : ""))
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
+            // Inline remediation — #33
+            if let outcome = syncOutcome {
+                InlineRemediationView(outcome: outcome)
+                    .padding(.horizontal, 10)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .background(isHovering ? Color(NSColor.selectedControlColor).opacity(0.1) : Color.clear)
-        .cornerRadius(4)
-        .onHover { isHovering = $0 }
     }
 
     private var statusColor: Color {

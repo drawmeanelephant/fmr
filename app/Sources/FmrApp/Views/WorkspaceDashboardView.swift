@@ -28,6 +28,16 @@ public struct WorkspaceDashboardView: View {
                 .pickerStyle(.segmented)
                 .padding(8)
 
+                // Remediation banner — #33 shown above repo list when sync refused/failed and not dismissed.
+                if model.showRemediationBanner {
+                    RemediationBannerView(message: model.remediationMessage) {
+                        model.dismissRemediationBanner()
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
                 // Repositories List — #31 empties, #32 skeletons + transitions
                 Group {
                     if model.isRefreshing && model.repos.isEmpty && !model.catalogLoaded {
@@ -193,13 +203,15 @@ public struct WorkspaceDashboardView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .help("Refresh Status (Cmd+R)")
+                .keyboardShortcut("r", modifiers: .command)
 
                 Button {
                     model.runDoctor(fix: false)
                 } label: {
                     Image(systemName: "stethoscope")
                 }
-                .help("Run Offline Diagnostics")
+                .help("Run Doctor Diagnostics (Cmd+D)")
+                .keyboardShortcut("d", modifiers: .command)
 
                 Button {
                     withAnimation(.easeInOut(duration: 0.25)) {
@@ -209,6 +221,7 @@ public struct WorkspaceDashboardView: View {
                     Image(systemName: "terminal")
                 }
                 .help("Toggle Terminal Output Drawer")
+                .keyboardShortcut("t", modifiers: .command)
             }
         }
         .sheet(isPresented: $model.isDoctorSheetPresented) {
@@ -467,14 +480,16 @@ struct RepoDetailView: View {
                     }
                     .padding(.bottom, 4)
 
-                    // Cards Grid
+                    // Cards Grid — #33 info popovers
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                         MetricCard(
                             title: "Working Tree",
                             value: repo.isClean ? "Clean" : "\(repo.dirtyTracked) Modified",
                             subtitle: "\(repo.untracked) untracked files",
                             icon: "doc.badge.gearshape",
-                            color: repo.isClean ? .green : .orange
+                            color: repo.isClean ? .green : .orange,
+                            infoTitle: "Working Tree",
+                            infoBody: "Counts tracked modifications vs untracked; dirty ≠ divergence. Fix: commit/stash in primary. Synced from dirty_tracked/untracked (docs/gui/json-contract.md:58)."
                         )
 
                         MetricCard(
@@ -482,7 +497,9 @@ struct RepoDetailView: View {
                             value: repo.behind > 0 ? "\(repo.behind) Behind" : (repo.ahead > 0 ? "\(repo.ahead) Ahead" : "Up to Date"),
                             subtitle: repo.state == "ok" ? "Fast-forwardable" : "State: \(repo.state)",
                             icon: "icloud.and.arrow.down",
-                            color: repo.behind > 0 ? .yellow : (repo.state == "ok" ? .green : .red)
+                            color: repo.behind > 0 ? .yellow : (repo.state == "ok" ? .green : .red),
+                            infoTitle: "Remote Sync",
+                            infoBody: "behind → fmr sync will ff-only; ahead/diverged → work in a worktree, never on primary (docs/ARCHITECTURE.md:64)."
                         )
 
                         MetricCard(
@@ -490,7 +507,9 @@ struct RepoDetailView: View {
                             value: "\(sessions.count) Active",
                             subtitle: "Session worktrees in ~/Code",
                             icon: "person.2.badge.gearshape",
-                            color: .blue
+                            color: .blue,
+                            infoTitle: "Conductor Sessions",
+                            infoBody: "Session worktrees under ~/Code/worktrees/<name>/<session> (WorkspaceViewModel worktreesRoot). Never touch .git file."
                         )
                     }
 
@@ -707,19 +726,25 @@ struct WorktreeSessionRow: View {
                 Button("Remove Worktree", role: .destructive) {
                     model.requestRemoveWorktree(session)
                 }
+                .accessibilityLabel("Remove worktree \(session.sessionName)")
+                .accessibilityHint("Removes the worktree at \(session.path)")
             } label: {
                 Label("Open in...", systemImage: "arrow.up.right.square")
                     .font(.caption)
             }
             .buttonStyle(.bordered)
+            .accessibilityLabel("Open worktree \(session.sessionName) in editor")
+            .accessibilityHint("Shows editors to open \(session.path)")
         }
         .padding(10)
         .background(Color(NSColor.windowBackgroundColor))
         .cornerRadius(6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(session.sessionName) at \(session.path)")
     }
 }
 
-// MARK: - Metric Card
+// MARK: - Metric Card (#33 info popover + a11y)
 
 struct MetricCard: View {
     let title: String
@@ -727,29 +752,65 @@ struct MetricCard: View {
     let subtitle: String
     let icon: String
     let color: Color
+    var infoTitle: String? = nil
+    var infoBody: String? = nil
+    @State private var showInfo = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
+            HStack(spacing: 4) {
                 Text(title)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityLabel(title)
+                if let infoTitle, let infoBody {
+                    Button {
+                        showInfo.toggle()
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("More info about \(title)")
+                    .accessibilityLabel("Info about \(title)")
+                    .accessibilityHint(infoBody)
+                    .popover(isPresented: $showInfo, arrowEdge: .top) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(infoTitle)
+                                .font(.caption.weight(.semibold))
+                            Text(infoBody)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(10)
+                        .frame(maxWidth: 260)
+                        .accessibilityElement(children: .combine)
+                    }
+                }
                 Spacer()
                 Image(systemName: icon)
                     .font(.subheadline)
                     .foregroundStyle(color)
+                    .accessibilityHidden(true)
             }
 
             Text(value)
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(.primary)
+                .accessibilityLabel("\(title): \(value)")
+                .accessibilityHint(subtitle)
 
             Text(subtitle)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
         }
         .padding(12)
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title) \(value) \(subtitle)")
     }
 }
